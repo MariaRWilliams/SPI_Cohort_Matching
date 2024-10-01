@@ -84,27 +84,85 @@ class QueryClass():
         q = f"""
                SELECT   dw_member_id,
                         to_char(servicedate, 'YYYYMM') as service_month,
-                        CASE WHEN categorydescription = 'Outpatient Services' Then 'Outpatient Surgery'
-                             WHEN categorydescription = 'Office Procedures' THEN 'Office Surgery'
-                             WHEN categorydescription in ('Inpatient Medical','Inpatient Surgical') THEN categorydescription
-                             WHEN categorydescription = 'Emergency Room' THEN 'ER_visit'
-                             WHEN categorydescription = 'Physician-Specialist Visit' THEN 'Spec_visit'
-                             WHEN categorydescription = 'Physician-PCP Visit' THEN 'PCP_visit'
-                             WHEN categorydescription = 'Physician-Preventive' THEN 'Preventive_visit'
-                             WHEN categorydescription = 'Outpatient Urgent Care' THEN 'Urgent_care_visit'
-                             WHEN categorydescription = 'Physician-Telehealth' THEN 'Telehealth_visit'
-                             END as description,
+                        categorydescription,
                         eventtype,
     	                case when eventtype = 'Neither' then count(distinct dw_member_id || servicedate || primaryprovidernpi)
     	                     when eventtype = 'Reversal' then -count(distinct dw_member_id || servicedate || primaryprovidernpi)
     	                     else 0 end as count_units
                FROM     {schema}.utilization
     	       WHERE    to_char(servicedate, 'YYYY') >= '{start_year}'
-    	                AND categorydescription in ('Inpatient Medical','Inpatient Surgical','Emergency Room','Physician-Specialist Visit',
-                                                    'Outpatient Surgery -11','Outpatient Surgery -22','Outpatient Surgery -14',
-                                                    'Physician-PCP Visit','Physician-Preventive','Physician-Telehealth','Outpatient Urgent Care'
-                                                 ) 
-               GROUP BY 1, 2,3, 4;
+                        AND categorydescription in ('Emergency Room','Physician-Specialist Visit',
+                                                    'Physician-PCP Visit','Physician-Preventive','Outpatient Urgent Care'
+                                                )
+                GROUP BY 1, 2,3, 4
             """
               
+        return q
+    
+    def query_conditions(self, schema, start_year):
+        
+        q = f"""
+                select dw_member_id
+                , max(case
+                        when svc_diag_1_code between 'F32' and 'F33' then 1
+                        when svc_diag_2_code between 'F32' and 'F33' then 1
+                        when svc_diag_3_code between 'F32' and 'F33' then 1
+                        when svc_diag_4_code between 'F32' and 'F33' then 1
+                        else 0
+                end) as depression
+                , max(case
+                        when svc_diag_1_code between 'E78' and 'E785' then 1
+                        when svc_diag_2_code between 'E78' and 'E785' then 1
+                        when svc_diag_3_code between 'E78' and 'E785' then 1
+                        when svc_diag_4_code between 'E78' and 'E785' then 1
+                        else 0
+                end) as hyperlipidemia
+                , max(case
+                        when svc_diag_1_code between 'M15' and 'M19' then 1
+                        when svc_diag_2_code between 'M15' and 'M19' then 1
+                        when svc_diag_3_code between 'M15' and 'M19' then 1
+                        when svc_diag_4_code between 'M15' and 'M19' then 1
+                        else 0
+                end) as osteoarthritis
+                , max(case
+                        when svc_diag_1_code between 'I502' and 'I5043' then 1
+                        when svc_diag_2_code between 'I502' and 'I5043' then 1
+                        when svc_diag_3_code between 'I502' and 'I5043' then 1
+                        when svc_diag_4_code between 'I502' and 'I5043' then 1
+                        else 0
+                end) as CHF
+                , max(case
+                        when svc_diag_1_code between 'C00' and 'C7A' then 1
+                        when svc_diag_2_code between 'C00' and 'C7A' then 1
+                        when svc_diag_3_code between 'C00' and 'C7A' then 1
+                        when svc_diag_4_code between 'C00' and 'C7A' then 1
+                        else 0
+                end) as cancer
+                , max(case
+                        when svc_diag_1_code between 'E08' and 'E13' then 1
+                        when svc_diag_2_code between 'E08' and 'E13' then 1
+                        when svc_diag_3_code between 'E08' and 'E13' then 1
+                        when svc_diag_4_code between 'E08' and 'E13' then 1
+                        else 0
+                end) as diabetes
+                , max(case
+                        when svc_diag_1_code between 'I25.1' and 'I25.119' then 1
+                        when svc_diag_2_code between 'I25.1' and 'I25.119' then 1
+                        when svc_diag_3_code between 'I25.1' and 'I25.119' then 1
+                        when svc_diag_4_code between 'I25.1' and 'I25.119' then 1
+                        else 0
+                end) as CAD
+                , max(case
+                        when svc_diag_1_code between 'J44' and 'J44.9' then 1
+                        when svc_diag_2_code between 'J44' and 'J44.9' then 1
+                        when svc_diag_3_code between 'J44' and 'J44.9' then 1
+                        when svc_diag_4_code between 'J44' and 'J44.9' then 1
+                        else 0
+                end) as COPD
+            from {schema}.medical
+            where to_char(svc_service_frm_date, 'YYYY') >= '{start_year}'
+            group by 1
+            having  depression+hyperlipidemia+osteoarthritis+cancer+CHF+diabetes+CAD+COPD >= 1
+            """
+            
         return q

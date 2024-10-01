@@ -7,7 +7,6 @@ class CG_Helper():
         no variables to initialize yet 
         """
         
-    # return CG/DW schema information
     def map_customers(self, customer_df, schema_df):
                                         
         mapping = {"7-ELEVEN, INC.": "SEVEN ELEVEN",
@@ -54,3 +53,5 @@ class CG_Helper():
         
         #return
         return customer_df[['table_schema', 'acronym', 'edw_cust', 'cg_cust', 'num_cust']]
+        
+        
