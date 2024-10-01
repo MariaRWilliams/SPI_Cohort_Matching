@@ -1,0 +1,13 @@
+#pip install -r requirements.txt
+
+#faiss-cpu==1.7.4
+pandas
+psycopg2-binary
+python-dotenv
+redshift-connector
+scikit-learn
+SQLAlchemy
+sqlalchemy-redshift
+sqlparse
+xlsxwriter
+pyarrow
