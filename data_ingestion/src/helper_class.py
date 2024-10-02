@@ -6,8 +6,8 @@ class CG_Helper():
         """
         no variables to initialize yet 
         """
-        
-    def map_customers(self, customer_df, schema_df):
+
+    def map_customers(self, customer_df, column_nm):
                                         
         mapping = {"7-ELEVEN, INC.": "SEVEN ELEVEN",
                     "ABA EMPLOYEE SERVICES": "LIGHTHOUSE AUTISM CENTER",
@@ -41,7 +41,13 @@ class CG_Helper():
                     "UNISYS CORPORATION": "UNISYS"
                 }
         
-        customer_df['edw_cust']  = customer_df['cg_cust'].str.upper().map(mapping).fillna(customer_df['cg_cust'].str.upper())
+        customer_df['edw_cust']  = customer_df[column_nm].str.upper().map(mapping).fillna(customer_df[column_nm].str.upper())
+
+        return customer_df
+                
+    def map_customers_schema(self, customer_df, schema_df):
+               
+        customer_df = self.map_customers(self, customer_df, 'cg_cust')
         customer_df = customer_df.merge(schema_df, on='acronym')
         
         #remove the extra lines

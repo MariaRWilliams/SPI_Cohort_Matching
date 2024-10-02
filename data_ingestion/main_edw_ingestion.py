@@ -6,6 +6,7 @@
 # COMMAND ----------
 
 from src import query_class_edw
+from src import helper_class
 import pandas as pd
 import re
 
@@ -15,21 +16,24 @@ import re
 EDW_USER = dbutils.secrets.get(scope="clinical-analysis", key="edw-service")
 EDW_PASSWORD = dbutils.secrets.get(scope="clinical-analysis", key="edw-password")
 
-start_year = '2024'
-#cust_list_string = 'STATE FARM'
-
 # COMMAND ----------
 
 #get list of customers from cg table
+#note: if get deletionVectors error, update cluster to one with Databricks Runtime 12.2 LTS - 15.3
 cust = (
     spark
-    .sql("SELECT distinct table_schema FROM dev.`clinical-analysis`.test")
+    .sql("SELECT distinct customer_nm FROM dev.`clinical-analysis`.cohort_matching_cg_mem")
 )
 
+#convert to edw customers
+hc = helper_class.CG_Helper()
 cust = cust.toPandas()
-cust_list = cust['table_schema'].unique()
+cust = hc.map_customers(cust, 'customer_nm')
+cust_list = cust[~cust['edw_cust'].isin(['BK', 'NON-ACCOLADE', 'ACCOLADE', 'BLANK'])]['edw_cust'].unique()
 cust_list = [re.sub("\'", "\'\'", s) for s in cust_list]
 cust_list_string = "','".join(cust_list)
+
+#print statements
 #print(cust_list_string)
 print(str(len(cust_list))+" Customer(s) selected")
 
@@ -40,23 +44,28 @@ print(str(len(cust_list))+" Customer(s) selected")
 # COMMAND ----------
 
 spark_reader = EDWSpoke(EDW_USER, EDW_PASSWORD).connect()
+start_year = '2023'
 
 # COMMAND ----------
 
 #query edw events
 qc = query_class_edw.QueryClass()
 q = qc.query_spi_events(start_year, cust_list_string)
-sdf = spark_reader.option('query', q).load()
-display(sdf)
+s_df = spark_reader.option('query', q).load()
+
+#check
+edw_df= s_df.toPandas()
+print(edw_df.head())
+#print(edw_df['org_nm'].unique().tolist())
 
 # COMMAND ----------
 
 #write data to table
 (
-    sdf
+    s_df
     .write
     .format("delta")
     .option("overwriteSchema", "true")
     .mode("overwrite")
-    .saveAsTable("dev.`clinical-analysis`.test")
+    .saveAsTable("dev.`clinical-analysis`.cohort_matching_edw_events")
 )
