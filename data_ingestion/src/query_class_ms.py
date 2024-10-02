@@ -13,12 +13,14 @@ class QueryClass():
                 , ls.description      as sex
                 , li.description      as industry
                 , lg.description      as state
+                , lr.description      as region
                 , min(mem.start_date) as start_date
                 , max(mem.end_date)   as end_date
             from eoc_workarea.member_table_full mem
-                    left join lookup_sex ls on mem.sex = ls.sex
-                    left join lookup_indstry li on mem.indstry = li.indstry
-                    left join lookup_geoloc lg on mem.state_cd = lg.geoloc
+                left join lookup_sex ls on mem.sex = ls.sex
+                left join lookup_indstry li on mem.indstry = li.indstry
+                left join lookup_geoloc lg on mem.state_cd = lg.geoloc
+                left join lookup_region lr on mem.region_cd = lr.region
             where len(mem.age) > 0
             and to_char(end_date, 'YYYY') >= '{start_year}'
             group by 1, 2, 3, 4, 5

@@ -94,7 +94,7 @@ class QueryClass():
                         AND categorydescription in ('Emergency Room','Physician-Specialist Visit',
                                                     'Physician-PCP Visit','Physician-Preventive','Outpatient Urgent Care'
                                                 )
-                GROUP BY 1, 2,3, 4
+                GROUP BY 1, 2, 3, 4
             """
               
         return q
