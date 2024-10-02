@@ -16,19 +16,28 @@ from src import matching_class
 from src import prep_class
 import pandas as pd
 
+pc = prep_class.Data_Prep()
+
 # COMMAND ----------
 
-#get list of event categories from cg table
+#these two lines bring in the code again if updated after original run
+import importlib
+import src.prep_class as prep_class
+importlib.reload(prep_class)
+pc = prep_class.Data_Prep()
+
+# COMMAND ----------
+
+#get event data
 #note: if get deletionVectors error, update cluster to one with Databricks Runtime 12.2 LTS - 15.3
-categories = (
+event_df = (
     spark
-    .sql("SELECT distinct category FROM dev.`clinical-analysis`.cohort_matching_edw_events")
+    .sql("SELECT * FROM dev.`clinical-analysis`.cohort_matching_edw_events")
 )
 
-categories = categories.toPandas()
-categories = categories['category'].unique()
-
-print(categories)
+event_df = event_df.toPandas()
+pc.set_categories(event_df)
+print(pc.category_list)
 
 # COMMAND ----------
 
@@ -37,4 +46,13 @@ print(categories)
 
 # COMMAND ----------
 
+#limit exposed cohort to only those without other events in period window
 
+preperiod = 3
+postperiod = 0
+
+exposed_subset = pc.clean_exposed(event_df, preperiod, postperiod)
+
+# COMMAND ----------
+
+print(exposed_subset.head())
