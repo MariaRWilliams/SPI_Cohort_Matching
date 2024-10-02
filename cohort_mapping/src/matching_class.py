@@ -1,5 +1,5 @@
 import pandas as pd
-from faiss import IndexFlatL2, IndexIVFFlat
+#from faiss import IndexFlatL2, IndexIVFFlat
 
 class Cohort_Matching():
 
