@@ -2,7 +2,7 @@
 # Code must be run on a local machine and uploaded to Databricks
 
 from src.query_class_cg import QueryClass
-from src.helper_class_cg import CG_Helper
+from src.helper_class import CG_Helper
 from src.connector_class import SQLConnector
 import pandas as pd
 
@@ -28,7 +28,7 @@ for x in range(len(schema_df.index)):
     c_df['acronym'] = schema_df.iloc[x,1]
     customer_df = pd.concat([customer_df, c_df])
             
-cust_df = cg_helper.map_customers(customer_df, schema_df)
+cust_df = cg_helper.map_customers_schema(customer_df, schema_df)
 #cust_df = cust_df[cust_df['edw_cust'].isin(['GENERAL MILLS'])]
 print(str(len(cust_df['edw_cust'].unique()))+" Customer(s) selected")
 
@@ -39,7 +39,7 @@ for x in cust_df['table_schema'].unique().tolist():
     sql_statement = cg_queries.query_med_claims(x, start_year)
     temp_df = cg_conn.query_data(sql_statement)
     temp_df['table_schema'] = x
-    schema_claims_df = temp_df[['table_schema', 'dw_member_id', 'service_month']]
+    schema_claims_df = temp_df[['table_schema', 'dw_member_id', 'service_month', 'med_allowed']]
     
     print("Running Pharmacy Claims Query for "+x)
     sql_statement = cg_queries.query_pharma_claims(x, start_year)
