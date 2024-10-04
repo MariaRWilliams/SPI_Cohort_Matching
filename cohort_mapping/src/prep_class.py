@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 class Data_Prep():
 
@@ -31,3 +32,18 @@ class Data_Prep():
             exposed_df = pd.concat([exposed_df, cat_df])
 
         return exposed_df
+    
+    def merge_claims_exp(self, df, claims_df, preperiod, postperiod):
+
+        df['preperiod'] = df['utc_period'] - pd.DateOffset(months=preperiod)
+        df['postperiod'] = df['utc_period'] + pd.DateOffset(months=postperiod)       
+
+        c_df = df[['dw_member_id', 'utc_period', 'start_date', 'end_date', 'preperiod', 'postperiod']].merge(claims_df, how='inner', on=['dw_member_id'])
+        c_df = c_df[(c_df['service_month']>=c_df['start_date']) &
+                    (c_df['service_month']>=c_df['preperiod']) &
+                    (c_df['service_month']<=c_df['postperiod']) &
+                    (c_df['service_month']<=c_df['end_date'])]
+        
+        c_df['mo_seq'] =  (c_df['service_month'].dt.to_period('M').astype(int) - c_df['utc_period'].dt.to_period('M').astype(int))
+
+        return c_df

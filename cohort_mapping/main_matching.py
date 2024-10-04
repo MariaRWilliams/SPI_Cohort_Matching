@@ -20,14 +20,6 @@ pc = prep_class.Data_Prep()
 
 # COMMAND ----------
 
-#these lines bring in the code again if updated after original run
-import importlib
-import src.prep_class as prep_class
-importlib.reload(prep_class)
-pc = prep_class.Data_Prep()
-
-# COMMAND ----------
-
 #get event data
 #note: if get deletionVectors error, update cluster to one with Databricks Runtime 12.2 LTS - 15.3
 event_df = (
@@ -65,7 +57,7 @@ print(exposed_subset[['category', 'person_id']].groupby('category').count().rese
 
 # COMMAND ----------
 
-print(exposed_subset.columns)
+exposed_subset.columns
 
 # COMMAND ----------
 
@@ -84,7 +76,7 @@ mem_df = (
 mem_df = mem_df.toPandas()
 mem_df['start_date'] = pd.to_datetime(mem_df['start_date'])
 mem_df['end_date'] = pd.to_datetime(mem_df['end_date'])
-print(mem_df.head())
+mem_df.head()
 
 
 # COMMAND ----------
@@ -116,27 +108,45 @@ claims_df = (
 
 claims_df = claims_df.toPandas()
 claims_df['service_month'] = pd.to_datetime(claims_df['service_month'].astype(str), format='%Y%m')
-print(claims_df.head())
+claims_df.head()
 
 # COMMAND ----------
 
-#add claims to member demographics - this also removes members without claims
+#Exposed dataset: collect member-level variables
 exposed_subset = mem_df.merge(exposed_subset, on='person_id', how = 'inner')
 exposed_subset = exposed_subset[(exposed_subset['utc_period']>=exposed_subset['start_date']) &
                                 (exposed_subset['utc_period']<=exposed_subset['end_date'])]
 
-exposed_subset = exposed_subset.merge(claims_df, how='inner', on=['dw_member_id'])
-control_subset = control_subset.merge(claims_df, how='inner', on=['dw_member_id'])
-
-exposed_subset = exposed_subset[(exposed_subset['service_month']>=exposed_subset['start_date']) &
-                  (exposed_subset['service_month']<=exposed_subset['end_date'])]
-control_subset = control_subset[(control_subset['service_month']>=control_subset['start_date']) &
-                  (control_subset['service_month']<=control_subset['end_date'])]
+exposed_subset.head()
 
 # COMMAND ----------
 
-exposed_subset_2.head()
+#these lines bring in the code again if updated after original run
+import importlib
+import src.prep_class as prep_class
+importlib.reload(prep_class)
+pc = prep_class.Data_Prep()
 
 # COMMAND ----------
 
-#pivot claims and utilization
+#add matching claims
+preperiod = 3
+postperiod = 0
+ex_sub_c = pc.merge_claims_exp(exposed_subset, claims_df, preperiod, postperiod)
+
+ex_sub_c.head()
+
+# COMMAND ----------
+
+#pivot
+ex_sub_c_2 = pd.pivot_table(ex_sub_c, values=['med_allowed'], index=['dw_member_id', 'utc_period'], columns=['mo_seq']).reset_index()
+
+
+
+# COMMAND ----------
+
+ex_sub_c_2[ex_sub_c_2['dw_member_id']=='1c7ff8e7b62a91c516fa547ab83c5b43']
+
+# COMMAND ----------
+
+#Control dataset: add claims, then create instances of possible windows
