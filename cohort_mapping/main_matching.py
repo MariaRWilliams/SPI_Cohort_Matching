@@ -2,8 +2,8 @@
 # MAGIC %md
 # MAGIC - DataPrep
 # MAGIC   - load event table and list available event categories
-# MAGIC   - choose 'exposed' cohort + month
-# MAGIC   - choose 'control' cohort
+# MAGIC   - choose 'exposed' cohort + month (at this point its the same old process)
+# MAGIC   - choose 'control' cohort (should be able to choose from Accolade or Marketscan)
 # MAGIC   - collect matching variables for both
 # MAGIC - Cohort Matching
 # MAGIC   - scale, etc. to prep for matching
@@ -12,6 +12,8 @@
 
 # COMMAND ----------
 
+#note: if get deletionVectors error while querying tables, update cluster to one with Databricks Runtime 12.2 LTS - 15.3
+from pyspark.sql.functions import to_date
 from src import matching_class
 from src import prep_class
 import pandas as pd
@@ -20,18 +22,50 @@ pc = prep_class.Data_Prep()
 
 # COMMAND ----------
 
-#get event data
-#note: if get deletionVectors error, update cluster to one with Databricks Runtime 12.2 LTS - 15.3
-event_df = (
-    spark
-    .sql("SELECT * FROM dev.`clinical-analysis`.cohort_matching_edw_events")
-)
+#clean window for exposed cohort: what months pre and post should not have other events?
+clean_preperiod = 3
+clean_postperiod = 0
 
-event_df = event_df.toPandas()
-event_df['utc_period'] = pd.to_datetime(event_df['utc_period'].astype(str), format='%Y%m')
-pc.set_categories(event_df)
+#evaluation window: in what window do we want to make sure members are fully eligible?
+eval_preperiod = 3
+eval_postperiod = 6
 
-print(pc.category_list)
+#cohort matching window: what months should we consider for matching?
+match_preperiod = 3
+match_postperiod = 0
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ###Get Data
+
+# COMMAND ----------
+
+#pull in event data
+event_df = pc.query_data(spark, dbutils, 'cohort_matching_edw_events')
+event_df = event_df.withColumn('utc_period', F.to_date(event_df.utc_period, 'yyyyMM'))
+
+pc.set_event_categories(event_df)
+print(pc.event_list)
+
+# COMMAND ----------
+
+#pull in claims and utilization data (would be better if full claims were already calculated by upload)
+claims_df = pc.query_data(spark, dbutils, 'cohort_matching_cg_claims')
+claims_df = claims_df.withColumn('service_month', F.to_date(claims_df.service_month, 'yyyyMM'))
+
+pc.set_util_categories(claims_df)
+print(pc.util_list)
+
+# COMMAND ----------
+
+#pull in member demographic data (would be better if 'end date' was date of data pull)
+mem_df = pc.query_data(spark, dbutils, 'cohort_matching_cg_mem')
+mem_df = mem_df.withColumn('start_date', F.to_date(mem_df.start_date, 'yyyyMM'))
+mem_df = mem_df.withColumn('end_date', F.to_date(mem_df.end_date, 'yyyyMM'))
+
+print(mem_df.columns)
+
 
 # COMMAND ----------
 
@@ -40,24 +74,40 @@ print(pc.category_list)
 
 # COMMAND ----------
 
-#limit exposed cohort to only those without other events in period window
-
-preperiod = 3
-postperiod = 0
-
-exposed_subset = event_df[event_df['category']!='exclude'].copy()
-exposed_subset = pc.clean_exposed(exposed_subset, preperiod, postperiod)
+#available events to choose from 
+print(pc.event_list)
 
 # COMMAND ----------
 
-#print(exposed_subset.head()
-print('Customers: '+ str(len(exposed_subset['org_nm'].unique().tolist())))
-print('Event sample size:')
-print(exposed_subset[['category', 'person_id']].groupby('category').count().reset_index())
+#select event categories to use in exposed subset
+exposed_categories = ['Case Management','High Cost Claimants (HCC)']
+
+# COMMAND ----------
+
+#limit exposed cohort to only those without other events in clean window (evaluates on all events, not just those selected)
+exposed_subset = event_df.filter(event_df.category!='exclude')
+exposed_subset = pc.clean_exposed(spark, exposed_subset, exposed_categories, clean_preperiod, clean_postperiod)
+
+# COMMAND ----------
+
+#add demographics and limit to those eligible for full evaluation window
+exposed_subset = pc.limit_exposed(exposed_subset, mem_df, eval_preperiod, eval_postperiod)
 
 # COMMAND ----------
 
 exposed_subset.columns
+
+# COMMAND ----------
+
+print('Customers: '+ str(exposed_subset.select('customer_nm').distinct().count()))
+print('Event sample size:')
+exposed_subset.select('category', 'person_id').groupby('category').count().show()
+
+# COMMAND ----------
+
+print('Customers: '+ str(len(exposed_subset['org_nm'].unique().tolist())))
+print('Event sample size:')
+print(exposed_subset[['category', 'person_id']].groupby('category').count().reset_index())
 
 # COMMAND ----------
 
@@ -66,23 +116,43 @@ exposed_subset.columns
 
 # COMMAND ----------
 
-#get member data
-#note: if get deletionVectors error, update cluster to one with Databricks Runtime 12.2 LTS - 15.3
-mem_df = (
-    spark
-    .sql("SELECT * FROM dev.`clinical-analysis`.cohort_matching_cg_mem")
-)
+#these lines bring in the code again if updated after original run
+import pyspark.sql.functions as F
+import importlib
+import src.prep_class as prep_class
 
-mem_df = mem_df.toPandas()
-mem_df['start_date'] = pd.to_datetime(mem_df['start_date'])
-mem_df['end_date'] = pd.to_datetime(mem_df['end_date'])
-mem_df.head()
-
+importlib.reload(prep_class)
+pc = prep_class.Data_Prep()
 
 # COMMAND ----------
 
-#remove members with events
-control_subset = mem_df[~mem_df['person_id'].isin(event_df['person_id'])]
+#remove members with events (all events from original data pull, not just from exposed subset)
+control_subset = mem_df.join(event_df, on='person_id', how='left_anti')
+
+# COMMAND ----------
+
+min_claim = claims_df.agg(F.min('service_month')).collect()[0][0]
+max_claim = claims_df.agg(F.max('service_month')).collect()[0][0]
+
+print(min_claim)
+print(max_claim)
+
+# COMMAND ----------
+
+claims_df.filter(claims_df['service_month'] >= max_claim).show()
+
+# COMMAND ----------
+
+hm = claims_df.select(F.collect_set('service_month').alias('service_month')).first()['service_month']
+print(hm)
+
+# COMMAND ----------
+
+#add months within evaluation window and within claims data
+#min_claim = min(claims_df['service_month'])
+control_subset = pc.limit_control(control_subset, eval_preperiod, eval_postperiod, min_claim, max_claim)
+#control_subset.show(5)
+print(control_subset)
 
 # COMMAND ----------
 
@@ -100,53 +170,20 @@ control_subset = mem_df[~mem_df['person_id'].isin(event_df['person_id'])]
 
 # COMMAND ----------
 
-#pull in claims and utilization data
-claims_df = (
-    spark
-    .sql("SELECT * FROM dev.`clinical-analysis`.cohort_matching_cg_claims")
-)
+#exposed dataset
+exposed_claims = pc.merge_claims(exposed_subset, claims_df, match_preperiod, match_postperiod)
+exposed_claims = pc.pivot_claims(exposed_claims, ['full_claims', 'Emergency Room'])
 
-claims_df = claims_df.toPandas()
-claims_df['service_month'] = pd.to_datetime(claims_df['service_month'].astype(str), format='%Y%m')
-claims_df.head()
-
-# COMMAND ----------
-
-#Exposed dataset: collect member-level variables
-exposed_subset = mem_df.merge(exposed_subset, on='person_id', how = 'inner')
-exposed_subset = exposed_subset[(exposed_subset['utc_period']>=exposed_subset['start_date']) &
-                                (exposed_subset['utc_period']<=exposed_subset['end_date'])]
-
+exposed_subset = exposed_subset.merge(exposed_claims, on=['dw_member_id', 'utc_period'])
 exposed_subset.head()
 
 # COMMAND ----------
 
-#these lines bring in the code again if updated after original run
-import importlib
-import src.prep_class as prep_class
-importlib.reload(prep_class)
-pc = prep_class.Data_Prep()
-
-# COMMAND ----------
-
-#add matching claims
-preperiod = 3
-postperiod = 0
-ex_sub_c = pc.merge_claims_exp(exposed_subset, claims_df, preperiod, postperiod)
-
-ex_sub_c.head()
-
-# COMMAND ----------
-
-#pivot
-ex_sub_c_2 = pd.pivot_table(ex_sub_c, values=['med_allowed'], index=['dw_member_id', 'utc_period'], columns=['mo_seq']).reset_index()
-
+#control dataset
+control_subset_2 = pc.merge_claims(control_subset, claims_df, match_preperiod, match_postperiod)
 
 
 # COMMAND ----------
 
-ex_sub_c_2[ex_sub_c_2['dw_member_id']=='1c7ff8e7b62a91c516fa547ab83c5b43']
-
-# COMMAND ----------
-
-#Control dataset: add claims, then create instances of possible windows
+control_subset_2 = pc.pivot_claims(control_subset_2, ['full_claims', 'Emergency Room'])
+control_subset_2.head()

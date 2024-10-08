@@ -30,6 +30,7 @@ class CG_Helper():
                     "LANDRY'S AND GOLDEN NUGGET": "LANDRYS INC",
                     "LASSONDE PAPPAS": "LASSONDE PAPPAS AND COMPANY",
                     "LOWES": "LOWE'S",
+                    "NEW ARCLIN U.S. HOLDING CORP.": "ARCLIN",
                     "PEPSI-COLA AND NATIONAL BRAND BEVERAGES": "HONICKMAN",
                     "PRISM/CITY OF REDDING": "CITY OF REDDING",
                     "PRISM/COUNTY OF SANTA BARBARA": "COUNTY OF SANTA BARBARA",
