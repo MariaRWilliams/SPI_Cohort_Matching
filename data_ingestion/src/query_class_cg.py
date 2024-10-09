@@ -36,16 +36,19 @@ class QueryClass():
 
         q = f"""
             select dw_member_id
-                , udf26_eligibility        as person_id
-                , to_char(mbr_dob, 'YYYY') as birth_year
-                , mbr_gender               as sex
-                , mbr_msa                  as msa
-                , mbr_state                as state
-                , mbr_region_name          as region
-                , ins_plan_type_desc       as plan_type
-                , ins_emp_group_name       as customer_nm
-                , min(ins_med_eff_date)    as start_date
-                , max(ins_med_term_date)   as end_date
+                , udf26_eligibility                   as person_id
+                , to_char(mbr_dob, 'YYYY')            as birth_year
+                , mbr_gender                          as sex
+                , mbr_msa                             as msa
+                , mbr_state                           as state
+                , mbr_region_name                     as region
+                , ins_plan_type_desc                  as plan_type
+                , ins_emp_group_name                  as customer_nm
+                , min(ins_med_eff_date)               as start_date
+                , case
+                    when max(ins_med_term_date) > current_date
+                        then current_date
+                    else max(ins_med_term_date) end as end_date
             from {schema}.eligibility
             where to_char(ins_med_term_date, 'YYYY') >= '{start_year}'
             group by 1,2,3,4,5,6,7,8,9
@@ -61,6 +64,7 @@ class QueryClass():
                 , sum(rev_allowed_amt)                     as med_allowed
             from {schema}.medical
             where to_char(svc_service_frm_date, 'YYYY') >= '{start_year}'
+            and rev_allowed_amt != 0
             group by 1, 2
             """
               
@@ -74,6 +78,7 @@ class QueryClass():
                 , sum(rev_allowed_amt)                     as pharma_allowed
             from {schema}.pharmacy	
             where to_char(svc_service_frm_date, 'YYYY') >= '{start_year}'
+            and rev_allowed_amt != 0
             group by 1, 2
             """
               
