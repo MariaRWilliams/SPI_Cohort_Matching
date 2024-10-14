@@ -12,6 +12,8 @@ class Data_Prep():
     def __init__(self):
         self.event_list = []
         self.util_list = []
+        self.min_claim = 0
+        self.max_claim = 0
 
     def set_event_categories(self, event_df):
 
@@ -28,6 +30,11 @@ class Data_Prep():
         self.util_list = col
 
         return 0
+    
+    def set_claims_window(self, claims_df, claims_cap):
+
+        self.min_claim = claims_df.agg(F.min('service_month')).collect()[0][0]
+        self.max_claim = datetime.datetime.strptime(claims_cap, '%Y-%m-%d')
     
     def query_data(self, spark, dbutils, table):
 
@@ -59,10 +66,14 @@ class Data_Prep():
 
         return exposed_df
     
-    def limit_exposed(self, df, demo_df, preperiod, postperiod):
+    def limit_exposed(self, df, demo_df, preperiod, postperiod, claims_cap):
 
         df = df.withColumn('preperiod', F.add_months(df.utc_period, -preperiod))
         df = df.withColumn('postperiod', F.add_months(df.utc_period, postperiod))
+
+        df = df.withColumn('first_claim', F.lit(self.min_claim))
+        df = df.withColumn('last_claim', F.lit(self.max_claim))
+        df = df.filter((df.preperiod >= df.first_claim) & (df.postperiod <= df.last_claim))
 
         condition_list = [df.person_id == demo_df.person_id,
                           df.preperiod>= demo_df.start_date,
@@ -71,49 +82,41 @@ class Data_Prep():
 
         df = df.join(demo_df, condition_list, how='inner').drop(demo_df.person_id)
 
+        drop_lst = ['preperiod', 'postperiod', 'first_claim', 'last_claim', 'start_date', 'end_date', 'table_schema']
+        df = df.drop(*drop_lst)
+
         return df
     
-    def limit_control(self, spark_session, claims_df, df, preperiod, postperiod, claims_cap):
+    def generate_control(self, spark_session, df, preperiod, postperiod, claims_cap):
 
-        #first get window (factoring evaluation window) from claims
-        claims_df = claims_df.withColumn('w_buffer', F.add_months(claims_df.service_month, preperiod))
-        min_claim = claims_df.agg(F.min('w_buffer')).collect()[0][0]
-        max_claim = datetime.datetime.strptime(claims_cap, '%Y-%m-%d') - pd.DateOffset(months=postperiod)
-        
-        # print(min_claim)
-        # print(max_claim)
-        
-        #then get window (factoring evaluation window) from member eligibility
-        df_wd = df.withColumn('pre_elig', F.add_months(df.start_date, preperiod))
+        min_claim_range = self.min_claim + pd.DateOffset(months=preperiod)
+        max_claim_range = self.max_claim - pd.DateOffset(months=postperiod)
+        df_wd = df.withColumn('pre_claim', F.lit(min_claim_range))
+        df_wd = df_wd.withColumn('post_claim', F.lit(max_claim_range))
+        df_wd = df_wd.withColumn('pre_elig', F.add_months(df.start_date, preperiod))
         df_wd = df_wd.withColumn('post_elig', F.add_months(df_wd.end_date, -(postperiod+1)))
-
-        #select the inner dates for each member
-        df_wd = df_wd.withColumn('pre_claim', F.lit(min_claim))
-        df_wd = df_wd.withColumn('post_claim', F.lit(max_claim))
         df_wd = df_wd.withColumn('range_min', F.greatest(df_wd['pre_elig'], df_wd['pre_claim']))
         df_wd = df_wd.withColumn('range_max', F.least(df_wd['post_elig'], df_wd['post_claim']))
 
-        #create date range for utc_period
         range_min = df_wd.agg(F.min('range_min')).collect()[0][0]
         range_max = df_wd.agg(F.max('range_max')).collect()[0][0]
+
         mo = pd.date_range(start=range_min, end=range_max, freq='MS')   
-        mo = pd.DataFrame({'utc_period':mo})
+        mo = pd.DataFrame({'range_period':mo})
 
-        #cross join
         df_wd = df_wd.crossJoin(spark_session.createDataFrame(mo))
-        df_wd = df_wd.filter((df_wd['range_min']<=df_wd['utc_period']) & (df_wd['range_max']>=df_wd['utc_period']))
-        df_wd = df_wd.drop('pre_elig', 'post_elig', 'pre_claim', 'post_claim', 'range_min', 'range_max')
-
-        #match eligibility table
-        df_wd = df_wd.withColumn('preperiod', F.add_months(df_wd.utc_period, -preperiod))
-        df_wd = df_wd.withColumn('postperiod', F.add_months(df_wd.utc_period, postperiod))
+        df_wd = df_wd.filter((df_wd['range_min']<=df_wd['range_period']) & (df_wd['range_max']>=df_wd['range_period']))
+        df_wd = df_wd.withColumn('utc_period', F.trunc('range_period', 'month'))
+        df_wd = df_wd.drop('pre_elig', 'post_elig', 'pre_claim', 'post_claim', 'range_min', 'range_max', 'range_period')
 
         return df_wd
     
     def merge_claims(self, spark_session, df, claims_df, preperiod, postperiod):
+        
+        df = df.withColumn('preperiod', F.add_months(df.utc_period, -preperiod))
+        df = df.withColumn('postperiod', F.add_months(df.utc_period, postperiod))
 
         condition_list = [df.dw_member_id == claims_df.dw_member_id,
-                    claims_df.service_month.between(df.start_date, df.end_date),
                     claims_df.service_month.between(df.preperiod, df.postperiod) 
                 ]
         
