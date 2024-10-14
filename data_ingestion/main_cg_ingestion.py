@@ -10,8 +10,11 @@ cg_conn = SQLConnector('cg')
 cg_queries = QueryClass()
 cg_helper = CG_Helper()
 file_path = 'data_ingestion/src_data/'
+
+#next update, change queries to equals instead of >=
+#this will allow us to pull data in chunks
 start_year = '2023'
-export_ver = '01'
+export_ver = '02'
 
 from warnings import filterwarnings
 filterwarnings("ignore", category=UserWarning, message='.*pandas only supports SQLAlchemy connectable.*')
@@ -57,6 +60,9 @@ for x in cust_df['table_schema'].unique().tolist():
     
     temp_df['table_schema'] = x
     schema_claims_df = pd.merge(schema_claims_df, temp_df, on = ['table_schema', 'dw_member_id', 'service_month'], how='outer')
+    
+    schema_claims_df.fillna(0, inplace=True)
+    schema_claims_df['total_allowed'] = schema_claims_df['med_allowed'] + schema_claims_df['pharma_allowed']
     claims_df = pd.concat([claims_df, schema_claims_df])
 
 member_df = pd.DataFrame()
@@ -73,12 +79,11 @@ for x in cust_df['table_schema'].unique().tolist():
     temp_df = cg_conn.query_data(sql_statement)
     temp_df['table_schema'] = x
     schema_mem_df = pd.merge(schema_mem_df, temp_df, on = ['dw_member_id', 'table_schema'], how='left')
+    
+    member_df.fillna(0, inplace=True)
     member_df = pd.concat([member_df, schema_mem_df])
 
-claims_df.fillna(0, inplace=True)
-member_df.fillna(0, inplace=True)
-
-claims_df.to_parquet(file_path+'cg_mo_data.parquet', index=False)
-member_df.to_parquet(file_path+'cg_mem_data.parquet', index=False)
+claims_df.to_parquet(file_path+'cg_mo_data_'+str(export_ver)+'.parquet', index=False)
+member_df.to_parquet(file_path+'cg_mem_data_'+str(export_ver)+'.parquet', index=False)
 
 cg_conn.dispose()

@@ -48,7 +48,7 @@ class CG_Helper():
                 
     def map_customers_schema(self, customer_df, schema_df):
                
-        customer_df = self.map_customers(self, customer_df, 'cg_cust')
+        customer_df = self.map_customers(customer_df, 'cg_cust')
         customer_df = customer_df.merge(schema_df, on='acronym')
         
         #remove the extra lines
