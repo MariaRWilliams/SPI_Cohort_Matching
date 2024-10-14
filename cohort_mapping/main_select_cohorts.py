@@ -14,6 +14,7 @@
 
 #note: if get deletionVectors error while querying tables, update cluster to one with Databricks Runtime 12.2 LTS - 15.3
 from pyspark.sql.functions import to_date
+import pyspark.sql.functions as F
 from src import matching_class
 from src import prep_class
 import pandas as pd
@@ -34,6 +35,9 @@ eval_postperiod = 6
 match_preperiod = 3
 match_postperiod = 0
 
+#claims max: what month is the max to expect correct claim data?
+claims_cap = '2024-08-01'
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -50,7 +54,7 @@ print(pc.event_list)
 
 # COMMAND ----------
 
-#pull in claims and utilization data (would be better if full claims were already calculated by upload)
+#pull in claims and utilization data (fix ingestion so total_allowed adds null as 0)
 claims_df = pc.query_data(spark, dbutils, 'cohort_matching_cg_claims')
 claims_df = claims_df.withColumn('service_month', F.to_date(claims_df.service_month, 'yyyyMM'))
 
@@ -59,7 +63,7 @@ print(pc.util_list)
 
 # COMMAND ----------
 
-#pull in member demographic data (would be better if 'end date' was date of data pull)
+#pull in member demographic data
 mem_df = pc.query_data(spark, dbutils, 'cohort_matching_cg_mem')
 mem_df = mem_df.withColumn('start_date', F.to_date(mem_df.start_date, 'yyyyMM'))
 mem_df = mem_df.withColumn('end_date', F.to_date(mem_df.end_date, 'yyyyMM'))
@@ -95,19 +99,9 @@ exposed_subset = pc.limit_exposed(exposed_subset, mem_df, eval_preperiod, eval_p
 
 # COMMAND ----------
 
-exposed_subset.columns
-
-# COMMAND ----------
-
 print('Customers: '+ str(exposed_subset.select('customer_nm').distinct().count()))
 print('Event sample size:')
 exposed_subset.select('category', 'person_id').groupby('category').count().show()
-
-# COMMAND ----------
-
-print('Customers: '+ str(len(exposed_subset['org_nm'].unique().tolist())))
-print('Event sample size:')
-print(exposed_subset[['category', 'person_id']].groupby('category').count().reset_index())
 
 # COMMAND ----------
 
@@ -116,43 +110,16 @@ print(exposed_subset[['category', 'person_id']].groupby('category').count().rese
 
 # COMMAND ----------
 
-#these lines bring in the code again if updated after original run
-import pyspark.sql.functions as F
-import importlib
-import src.prep_class as prep_class
-
-importlib.reload(prep_class)
-pc = prep_class.Data_Prep()
-
-# COMMAND ----------
-
 #remove members with events (all events from original data pull, not just from exposed subset)
 control_subset = mem_df.join(event_df, on='person_id', how='left_anti')
 
 # COMMAND ----------
 
-min_claim = claims_df.agg(F.min('service_month')).collect()[0][0]
-max_claim = claims_df.agg(F.max('service_month')).collect()[0][0]
+#add months: within claims data, within eligibility window for each member, with buffer for evaluation window
+#get preperiod/postperiod and service_month tightened up
+control_subset = pc.limit_control(spark, claims_df, control_subset, eval_preperiod, eval_postperiod, claims_cap)
+control_subset.display()
 
-print(min_claim)
-print(max_claim)
-
-# COMMAND ----------
-
-claims_df.filter(claims_df['service_month'] >= max_claim).show()
-
-# COMMAND ----------
-
-hm = claims_df.select(F.collect_set('service_month').alias('service_month')).first()['service_month']
-print(hm)
-
-# COMMAND ----------
-
-#add months within evaluation window and within claims data
-#min_claim = min(claims_df['service_month'])
-control_subset = pc.limit_control(control_subset, eval_preperiod, eval_postperiod, min_claim, max_claim)
-#control_subset.show(5)
-print(control_subset)
 
 # COMMAND ----------
 
@@ -166,24 +133,39 @@ print(control_subset)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ###Add features and prepare for matching
+# MAGIC ###Add claims features
+
+# COMMAND ----------
+
+#these lines bring in the code again if updated after original run
+import pyspark.sql.functions as F
+import importlib
+import src.prep_class as prep_class
+
+importlib.reload(prep_class)
+pc = prep_class.Data_Prep()
+
+# COMMAND ----------
+
+#choose what claims data to include as variables
+print(pc.util_list)
+
+claims_list = ['total_allowed', 'Emergency Room']
 
 # COMMAND ----------
 
 #exposed dataset
-exposed_claims = pc.merge_claims(exposed_subset, claims_df, match_preperiod, match_postperiod)
-exposed_claims = pc.pivot_claims(exposed_claims, ['full_claims', 'Emergency Room'])
+exposed_claims = pc.merge_claims(spark, exposed_subset, claims_df, match_preperiod, match_postperiod)
+exposed_claims = pc.pivot_claims(exposed_claims, claims_list)
+exposed_subset = exposed_subset.join(exposed_claims, ['dw_member_id', 'utc_period'], how='inner')
 
-exposed_subset = exposed_subset.merge(exposed_claims, on=['dw_member_id', 'utc_period'])
-exposed_subset.head()
+exposed_subset.display()
 
 # COMMAND ----------
 
 #control dataset
-control_subset_2 = pc.merge_claims(control_subset, claims_df, match_preperiod, match_postperiod)
+control_claims = pc.merge_claims(spark, control_subset, claims_df, match_preperiod, match_postperiod)
+control_claims = pc.pivot_claims(control_claims, claims_list)
+control_subset = control_subset.join(control_claims, ['dw_member_id', 'utc_period'], how='inner')
 
-
-# COMMAND ----------
-
-control_subset_2 = pc.pivot_claims(control_subset_2, ['full_claims', 'Emergency Room'])
-control_subset_2.head()
+control_subset.display()
