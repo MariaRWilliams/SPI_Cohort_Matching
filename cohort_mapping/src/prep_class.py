@@ -5,12 +5,15 @@ import pandas as pd
 import numpy as np
 import pyspark as spark
 import pyspark.pandas as ps
+import datetime
 
 class Data_Prep():
 
     def __init__(self):
         self.event_list = []
         self.util_list = []
+        self.min_claim = 0
+        self.max_claim = 0
 
     def set_event_categories(self, event_df):
 
@@ -24,11 +27,14 @@ class Data_Prep():
         col.remove('table_schema')
         col.remove('dw_member_id')
         col.remove('service_month')
-        col.remove('med_allowed')
-        col.remove('pharma_allowed')
         self.util_list = col
 
         return 0
+    
+    def set_claims_window(self, claims_df, claims_cap):
+
+        self.min_claim = claims_df.agg(F.min('service_month')).collect()[0][0]
+        self.max_claim = datetime.datetime.strptime(claims_cap, '%Y-%m-%d')
     
     def query_data(self, spark, dbutils, table):
 
@@ -60,10 +66,14 @@ class Data_Prep():
 
         return exposed_df
     
-    def limit_exposed(self, df, demo_df, preperiod, postperiod):
+    def limit_exposed(self, df, demo_df, preperiod, postperiod, claims_cap):
 
         df = df.withColumn('preperiod', F.add_months(df.utc_period, -preperiod))
         df = df.withColumn('postperiod', F.add_months(df.utc_period, postperiod))
+
+        df = df.withColumn('first_claim', F.lit(self.min_claim))
+        df = df.withColumn('last_claim', F.lit(self.max_claim))
+        df = df.filter((df.preperiod >= df.first_claim) & (df.postperiod <= df.last_claim))
 
         condition_list = [df.person_id == demo_df.person_id,
                           df.preperiod>= demo_df.start_date,
@@ -72,66 +82,68 @@ class Data_Prep():
 
         df = df.join(demo_df, condition_list, how='inner').drop(demo_df.person_id)
 
+        drop_lst = ['preperiod', 'postperiod', 'first_claim', 'last_claim', 'start_date', 'end_date', 'table_schema']
+        df = df.drop(*drop_lst)
+
         return df
     
-    def limit_control(self, df, preperiod, postperiod, min_claim, max_claim):
+    def generate_control(self, spark_session, df, preperiod, postperiod, claims_cap):
 
-        df.show(5)
+        min_claim_range = self.min_claim + pd.DateOffset(months=preperiod)
+        max_claim_range = self.max_claim - pd.DateOffset(months=postperiod)
+        df_wd = df.withColumn('pre_claim', F.lit(min_claim_range))
+        df_wd = df_wd.withColumn('post_claim', F.lit(max_claim_range))
+        df_wd = df_wd.withColumn('pre_elig', F.add_months(df.start_date, preperiod))
+        df_wd = df_wd.withColumn('post_elig', F.add_months(df_wd.end_date, -(postperiod+1)))
+        df_wd = df_wd.withColumn('range_min', F.greatest(df_wd['pre_elig'], df_wd['pre_claim']))
+        df_wd = df_wd.withColumn('range_max', F.least(df_wd['post_elig'], df_wd['post_claim']))
 
-        df_wd = df.withColumn('preperiod', F.add_months(df.start_date, preperiod))
-        df_wd = df_wd.withColumn('postperiod', F.add_months(df_wd.end_date, -postperiod))
+        range_min = df_wd.agg(F.min('range_min')).collect()[0][0]
+        range_max = df_wd.agg(F.max('range_max')).collect()[0][0]
 
-        range_min = df_wd.agg(F.min('preperiod')).collect()[0][0]
-        range_max = df_wd.agg(F.max('postperiod')).collect()[0][0]      
+        mo = pd.date_range(start=range_min, end=range_max, freq='MS')   
+        mo = pd.DataFrame({'range_period':mo})
 
-        if range_min < min_claim:
-            range_min = min_claim
+        df_wd = df_wd.crossJoin(spark_session.createDataFrame(mo))
+        df_wd = df_wd.filter((df_wd['range_min']<=df_wd['range_period']) & (df_wd['range_max']>=df_wd['range_period']))
+        df_wd = df_wd.withColumn('utc_period', F.trunc('range_period', 'month'))
+        df_wd = df_wd.drop('pre_elig', 'post_elig', 'pre_claim', 'post_claim', 'range_min', 'range_max', 'range_period')
 
-        if range_max > max_claim:
-            range_max = max_claim
-
-        mo = ps.date_range(start=range_min, end=range_max, freq='M')
-        # mo_df = pd.DataFrame({'utc_period':mo})
-
-        # df_wd = df_wd.merge(mo_df, how='cross')
-        # df_wd = df_wd[(df_wd['preperiod']<=df_wd['utc_period']) & (df_wd['postperiod']>=df_wd['utc_period'])]
-
-        # df_wd.drop(columns=['preperiod', 'postperiod'], inplace=True)
-
-        # return df_wd
-        return mo
+        return df_wd
     
-    def merge_claims(self, df, claims_df, preperiod, postperiod):
-
-        df['preperiod'] = df['utc_period'] - pd.DateOffset(months=preperiod)
-        df['postperiod'] = df['utc_period'] + pd.DateOffset(months=postperiod)       
-
-        c_df = df[['dw_member_id', 'utc_period', 'start_date', 'end_date', 'preperiod', 'postperiod']].merge(claims_df, how='inner', on=['dw_member_id'])
-        c_df = c_df[(c_df['service_month']>=c_df['start_date']) &
-                    (c_df['service_month']>=c_df['preperiod']) &
-                    (c_df['service_month']<=c_df['postperiod']) &
-                    (c_df['service_month']<=c_df['end_date'])]
+    def merge_claims(self, spark_session, df, claims_df, preperiod, postperiod):
         
-        c_df['full_claims'] = c_df['med_allowed'] + c_df['pharma_allowed']
-        c_df.drop(columns=['preperiod', 'postperiod'], inplace=True)
+        df = df.withColumn('preperiod', F.add_months(df.utc_period, -preperiod))
+        df = df.withColumn('postperiod', F.add_months(df.utc_period, postperiod))
+
+        condition_list = [df.dw_member_id == claims_df.dw_member_id,
+                    claims_df.service_month.between(df.preperiod, df.postperiod) 
+                ]
         
-        return c_df
+        df = df.join(claims_df, condition_list, how='inner').drop(claims_df.dw_member_id)
+       
+        return df
     
     def pivot_claims(self, df, col_list):
 
-        df_pivot = df[['dw_member_id', 'utc_period']]
-        df_pivot = df_pivot.drop_duplicates()
-        print(df_pivot.columns)
-
-        df['mo_seq'] =  (df['service_month'].dt.to_period('M').astype(int) - 
-                         df['utc_period'].dt.to_period('M').astype(int))
+        df = df.withColumn('mo_seq', F.round(F.months_between(df['service_month'], df['utc_period']), 0).cast('integer'))
+        df_pivot = df.select('dw_member_id', 'utc_period').dropDuplicates()
 
         for c in col_list:
-            time_set = pd.pivot_table(df, values=c, index=['dw_member_id', 'utc_period'], columns=['mo_seq'])
-            time_set = time_set.add_prefix(c+' ')
-            time_set = time_set.reset_index()
+            time_set = (df.withColumn('mo_pivot',  F.concat(F.lit(c), F.col('mo_seq')))
+                        .groupBy(['dw_member_id', 'utc_period'])
+                        .pivot('mo_pivot')
+                        .agg(F.round(F.first(c), 2))
+            )
 
-            df_pivot = df_pivot.merge(time_set, how='left', on=['dw_member_id', 'utc_period'])
+            condition_list = [df_pivot.dw_member_id == time_set.dw_member_id, 
+                              df_pivot.utc_period == time_set.utc_period]
+            
+            df_pivot = df_pivot.join(time_set, condition_list, how='left').select(df_pivot["*"], *[time_set[c] for c in time_set.columns if c not in ["dw_member_id", "utc_period"]])
+
+        df_pivot = df_pivot.na.fill(0)
+        df_pivot = df_pivot.select([F.col(x).alias(x.replace(' ', '_')) for x in df_pivot.columns])
+        df_pivot = df_pivot.select(*[x.lower() for x in df_pivot.columns])
 
         return df_pivot
     
