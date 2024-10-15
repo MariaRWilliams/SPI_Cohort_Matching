@@ -37,7 +37,7 @@ class QueryClass():
         q = f"""
             select dw_member_id
                 , udf26_eligibility                   as person_id
-                , to_char(mbr_dob, 'YYYY')            as birth_year
+                , to_char(mbr_dob, 'YYYYMM')          as birth_year
                 , mbr_gender                          as sex
                 , mbr_msa                             as msa
                 , mbr_state                           as state
