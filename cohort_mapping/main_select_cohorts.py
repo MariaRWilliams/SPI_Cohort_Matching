@@ -1,13 +1,19 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC - DataPrep
-# MAGIC   - load data
-# MAGIC   - choose 'exposed' / 'control'
-# MAGIC   - arrange
-# MAGIC - Cohort Matching
-# MAGIC   - scale, etc. to prep for matching
-# MAGIC   - run matching algorithm
-# MAGIC   - export matching data
+# MAGIC ##Create Datasets for Event Subset and Control Subset
+# MAGIC Steps Contained in this Notebook:
+# MAGIC   - load and clean data
+# MAGIC   - choose 'exposed' / 'control' subsets from Accolade data or Marketscan
+# MAGIC   - manipulate matching variables
+# MAGIC   - export to Data Catalog
+# MAGIC
+# MAGIC Remaining Tasks:
+# MAGIC   - calculate age
+# MAGIC   - filter outliers
+# MAGIC   - incorporate Marketscan
+# MAGIC   - incorporate dataset statistics
+# MAGIC
+# MAGIC
 
 # COMMAND ----------
 
@@ -16,7 +22,6 @@ from pyspark.sql.functions import to_date
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
 from pyspark.sql import DataFrame
-from src import matching_class
 from src import prep_class
 import pandas as pd
 
@@ -138,16 +143,16 @@ control_subset = pc.generate_control(spark, control_subset, eval_preperiod, eval
 # COMMAND ----------
 
 # these lines bring in the code again if updated after original run
-import pyspark.sql.functions as F
-import importlib
-import src.prep_class as prep_class
+# import pyspark.sql.functions as F
+# import importlib
+# import src.prep_class as prep_class
 
-importlib.reload(prep_class)
-pc = prep_class.Data_Prep()
+# importlib.reload(prep_class)
+# pc = prep_class.Data_Prep()
 
-pc.set_claims_window(claims_df, claims_cap)
-print("Minimum Claim: " + str(pc.min_claim))
-print("Maximum Claim: " + str(pc.max_claim))
+# pc.set_claims_window(claims_df, claims_cap)
+# print("Minimum Claim: " + str(pc.min_claim))
+# print("Maximum Claim: " + str(pc.max_claim))
 
 # COMMAND ----------
 
@@ -191,3 +196,20 @@ combined_cohorts.columns
 # COMMAND ----------
 
 combined_cohorts = pc.calc_age(combined_cohorts)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ###Write data to table
+
+# COMMAND ----------
+
+#write data to table
+(
+    combined_cohorts
+    .write
+    .format("delta")
+    .option("overwriteSchema", "true")
+    .mode("overwrite")
+    .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts")
+)
