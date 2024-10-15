@@ -1,4 +1,6 @@
 import pandas as pd
+import pyspark.sql.functions as F
+import pyspark.sql.types as T
 #from faiss import IndexFlatL2, IndexIVFFlat
 
 class Cohort_Matching():
@@ -7,6 +9,18 @@ class Cohort_Matching():
         """
         no variables to initialize yet 
         """
+
+    def unpack_vector(self, df, unchanged_columns, scale_columns, vector_col):
+
+        def split_array_to_list(col):
+            def to_list(v):
+                return v.toArray().tolist()
+            return F.udf(to_list, T.ArrayType(T.DoubleType()))(col)
+
+        df_split = df.withColumn("split_int", split_array_to_list(F.col(vector_col)))
+        df_split = df_split.select(*unchanged_columns, *[F.col("split_int")[i].alias(scale_columns[i]) for i in range(len(scale_columns))])
+
+        return df_split
         
     #original matching model
     def FAISS(self, control, intervention):
