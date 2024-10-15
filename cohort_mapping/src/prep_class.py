@@ -107,7 +107,9 @@ class Data_Prep():
         df_wd = df_wd.crossJoin(spark_session.createDataFrame(mo))
         df_wd = df_wd.filter((df_wd['range_min']<=df_wd['range_period']) & (df_wd['range_max']>=df_wd['range_period']))
         df_wd = df_wd.withColumn('utc_period', F.trunc('range_period', 'month'))
-        df_wd = df_wd.drop('pre_elig', 'post_elig', 'pre_claim', 'post_claim', 'range_min', 'range_max', 'range_period')
+        df_wd = df_wd.drop('pre_elig', 'post_elig', 'pre_claim', 'post_claim', 'range_min', 'range_max', 'range_period', 'start_date', 'end_date', 'table_schema')
+
+        df_wd = df_wd.withColumn('category', F.lit('control'))
 
         return df_wd
     
@@ -147,6 +149,11 @@ class Data_Prep():
 
         return df_pivot
     
+    def calc_age(self, df):
+
+        df = df.withColumn('age', )
+
+        return df
 
     
 

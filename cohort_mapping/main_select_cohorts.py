@@ -1,10 +1,9 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC - DataPrep
-# MAGIC   - load event table and list available event categories
-# MAGIC   - choose 'exposed' cohort + month (at this point its the same old process)
-# MAGIC   - choose 'control' cohort (should be able to choose from Accolade or Marketscan)
-# MAGIC   - collect matching variables for both
+# MAGIC   - load data
+# MAGIC   - choose 'exposed' / 'control'
+# MAGIC   - arrange
 # MAGIC - Cohort Matching
 # MAGIC   - scale, etc. to prep for matching
 # MAGIC   - run matching algorithm
@@ -15,6 +14,8 @@
 #note: if get deletionVectors error while querying tables, update cluster to one with Databricks Runtime 12.2 LTS - 15.3
 from pyspark.sql.functions import to_date
 import pyspark.sql.functions as F
+import pyspark.sql.types as T
+from pyspark.sql import DataFrame
 from src import matching_class
 from src import prep_class
 import pandas as pd
@@ -132,20 +133,21 @@ control_subset = pc.generate_control(spark, control_subset, eval_preperiod, eval
 
 # MAGIC %md
 # MAGIC ###Add claims features
+# MAGIC Also adds datatsets together, distinguished by category
 
 # COMMAND ----------
 
 # these lines bring in the code again if updated after original run
-# import pyspark.sql.functions as F
-# import importlib
-# import src.prep_class as prep_class
+import pyspark.sql.functions as F
+import importlib
+import src.prep_class as prep_class
 
-# importlib.reload(prep_class)
-# pc = prep_class.Data_Prep()
+importlib.reload(prep_class)
+pc = prep_class.Data_Prep()
 
-# pc.set_claims_window(claims_df, claims_cap)
-# print("Minimum Claim: " + str(pc.min_claim))
-# print("Maximum Claim: " + str(pc.max_claim))
+pc.set_claims_window(claims_df, claims_cap)
+print("Minimum Claim: " + str(pc.min_claim))
+print("Maximum Claim: " + str(pc.max_claim))
 
 # COMMAND ----------
 
@@ -159,18 +161,33 @@ claims_list = ['total_allowed', 'Emergency Room']
 
 # COMMAND ----------
 
-#exposed dataset
-exposed_claims = pc.merge_claims(spark, exposed_subset, claims_df, match_preperiod, match_postperiod)
-exposed_claims = pc.pivot_claims(exposed_claims, claims_list)
-exposed_subset = exposed_subset.join(exposed_claims, ['dw_member_id', 'utc_period'], how='inner')
+for subset in [exposed_subset, control_subset]:
+    subset_claims = pc.merge_claims(spark, subset, claims_df, match_preperiod, match_postperiod)
+    subset_claims = pc.pivot_claims(subset_claims, claims_list)
+    subset_joined = subset.join(subset_claims, ['dw_member_id', 'utc_period'], how='inner')
 
-exposed_subset.display()
+    if subset == exposed_subset:
+        combined_cohorts = subset_joined
+    else:
+        combined_cohorts = combined_cohorts.unionByName(subset_joined)
+
 
 # COMMAND ----------
 
-#control dataset
-control_claims = pc.merge_claims(spark, control_subset, claims_df, match_preperiod, match_postperiod)
-control_claims = pc.pivot_claims(control_claims, claims_list)
-control_subset = control_subset.join(control_claims, ['dw_member_id', 'utc_period'], how='inner')
+print('Customers: '+ str(combined_cohorts.select('customer_nm').distinct().count()))
+print('Event sample size:')
+combined_cohorts.select('category', 'person_id').groupby('category').count().show()
 
-control_subset.display()
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ###Add calculated features
+# MAGIC Age, sum of utilization, etc
+
+# COMMAND ----------
+
+combined_cohorts.columns
+
+# COMMAND ----------
+
+combined_cohorts = pc.calc_age(combined_cohorts)
