@@ -9,15 +9,17 @@
 
 # COMMAND ----------
 
+# MAGIC %pip install faiss-cpu
+
+# COMMAND ----------
+
 from src import prep_class
 from src import matching_class
-from pyspark.ml.feature import StandardScaler, VectorAssembler, OneHotEncoder
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
 
-pc = prep_class.Data_Prep()
 mc = matching_class.Cohort_Matching()
-sc = StandardScaler()
+pc = prep_class.Data_Prep()
 
 # COMMAND ----------
 
@@ -33,12 +35,7 @@ full_df.select('category', 'person_id').groupby('category').count().show()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ###Choose Variables
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ###Scale and Vectorize
+# MAGIC ###Choose / Prepare Variables
 
 # COMMAND ----------
 
@@ -46,43 +43,102 @@ full_df.columns
 
 # COMMAND ----------
 
-unchanged_columns = ['person_id', 'category','depression', 'hyperlipidemia', 'osteoarthritis', 'chf', 'cancer', 'diabetes', 'cad', 'copd']
-scale_columns = ['total_allowed-1', 'total_allowed-2', 'total_allowed-3', 'total_allowed0']
-cat_columns = ['sex']
+#select all columns used for matching here
+id_columns = ['person_id', 'category', 'utc_period']
+binary_columns = ['depression', 'hyperlipidemia', 'osteoarthritis', 'chf', 'cancer', 'diabetes', 'cad', 'copd']
+scale_columns = ['total_allowed-1', 'total_allowed-2', 'total_allowed-3', 'total_allowed0', 'total_allowed_0to5sum', 'age']
+to_binary_columns = ['sex']
 
 
 # COMMAND ----------
-
 
 #change scale columns to vector and scale
-scale_assembler = VectorAssembler().setInputCols(scale_columns).setOutputCol("vector")
-df_with_vector = scale_assembler.transform(full_df)
-
-scaler = StandardScaler(inputCol="vector", outputCol="scaledFeatures")
-scaler_model = scaler.fit(df_with_vector.select("vector"))
-full_df_scaled = scaler_model.transform(df_with_vector)
-
-full_df_scaled = mc.unpack_vector(full_df_scaled, unchanged_columns, scale_columns, 'scaledFeatures')
-
-# COMMAND ----------
+df_with_vector = mc.create_vector(full_df, scale_columns)
+full_df_scaled = mc.scale_vector(df_with_vector)
+full_df_scaled = mc.unpack_vector(full_df_scaled, id_columns, scale_columns, 'scaledFeatures')
 
 #change cat_columns to individual columns
-
-new_df = (full_df
-          .select(*cat_columns, *unchanged_columns)
-          .groupBy(*unchanged_columns)
-          .pivot(*cat_columns)
-          .agg(F.first(*cat_columns))
-)
-
-
-
+full_df_cat = mc.hot_encode(full_df, to_binary_columns, id_columns)
 
 # COMMAND ----------
 
-new_df = new_df.na.fill(0)
+#add scaled columns, binary columns in one dataset
+ready_df = full_df.select(*id_columns, *binary_columns)
+ready_df = ready_df.join(full_df_cat, [*id_columns], how='outer')
+ready_df = ready_df.join(full_df_scaled, [*id_columns], how='outer')
+ready_df = ready_df.na.fill(0)
+#ready_df.display()
 
-new_df.display()
+# COMMAND ----------
+
+cols = list(set(ready_df.columns) - set(id_columns))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ###Matching Algorithm
+
+# COMMAND ----------
+
+#number of control matches to return for each exposed member
+num_matches = 5
+
+#nlist = the number of cells to cluster the control into
+n_list = 50
+
+#nprobe = the number of cells to check for the nearest neighbors
+n_probe = 10
+
+#max_distance = (look into this one- what distance does FAISS return? euclidian?)
+max_distance = 50
+
+# COMMAND ----------
+
+exp_df = ready_df.filter(ready_df['category']=='Case Management')
+exp_ids = exp_df.select(*id_columns).toPandas()
+exp_vars = exp_df.select(*cols).toPandas()
+
+# COMMAND ----------
+
+control_df = ready_df.filter(ready_df['category']=='control')
+control_ids = control_df.select(*id_columns).toPandas()
+control_vars = control_df.select(*cols).toPandas()
+
+# COMMAND ----------
+
+control_df = control_df.toPandas()
+exp_df = exp_df.toPandas()
+
+# COMMAND ----------
+
+#original code broken out
+index = mc.create_index(control_vars, n_list)
+distances, neighbor_indexes = mc.search_index(index, exp_vars, num_matches, n_probe)
+
+# COMMAND ----------
+
+mc.search_index_test(index, control_vars, num_matches)
+
+# COMMAND ----------
+
+#this needs to be expanded to allow for more than one match
+matched_record = mc.pick_matches(distances, neighbor_indexes, exp_vars, max_distance)
+
+# COMMAND ----------
+
+print(matched_record[(matched_record['control_index']<8000) & (matched_record['control_index']>0)])
+#print(matched_record)
+
+# COMMAND ----------
+
+hm, hm2 = mc.tag_matches(matched_record, control_df, exp_df)
+print(hm.head())
+print(hm2.head())
+
+# COMMAND ----------
+
+hm = mc.tag_matches(matched_record, control_ids, exp_ids)
+print(hm.head())
 
 # COMMAND ----------
 

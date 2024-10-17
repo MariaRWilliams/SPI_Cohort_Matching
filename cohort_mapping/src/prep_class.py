@@ -149,9 +149,36 @@ class Data_Prep():
 
         return df_pivot
     
+    def filter_claims(self, df, col_list):
+
+        col_list = [x.lower() for x in col_list]
+        col_list = [x.replace(' ', '_') for x in col_list]
+
+        selected_columns = []
+        for c in col_list:
+            selected_columns = selected_columns + [column for column in df.columns if column.startswith(c)]
+
+        df = df.filter(F.least(*[F.col(c) >= 0 for c in selected_columns]) == True)
+
+        return df
+    
     def calc_age(self, df):
 
-        #df = df.withColumn('age', )
+        df = df.withColumn('age', F.round(F.months_between(df['utc_period'], df['birth_year'])/12, 0).cast('integer'))
+
+        return df
+    
+    def sum_periods(self, df, col_list, preperiod, postperiod):
+
+        col_list = [x.lower() for x in col_list]
+        col_list = [x.replace(' ', '_') for x in col_list]
+        
+        for c in col_list:
+            col_nm = c+'_'+str(preperiod)+'to'+str(postperiod)+'sum'
+            df = df.withColumn(col_nm, F.lit(0))
+            
+            for n in range(preperiod, postperiod):
+                df = df.withColumn(col_nm, F.round(df[col_nm]+ df[c+str(n)], 2))
 
         return df
 
