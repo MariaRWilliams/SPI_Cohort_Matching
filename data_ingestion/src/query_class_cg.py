@@ -97,7 +97,9 @@ class QueryClass():
                FROM     {schema}.utilization
     	       WHERE    to_char(servicedate, 'YYYY') >= '{start_year}'
                         AND categorydescription in ('Emergency Room','Physician-Specialist Visit',
-                                                    'Physician-PCP Visit','Physician-Preventive','Outpatient Urgent Care'
+                                                    'Physician-PCP Visit','Physician-Preventive','Outpatient Urgent Care',
+                                                    'Physician-Telehealth', 'Inpatient Medical','Inpatient Surgical',
+                                                    'Office Procedures', 'Outpatient Services'
                                                 )
                 GROUP BY 1, 2, 3, 4
             """
