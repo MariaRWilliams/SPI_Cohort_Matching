@@ -8,9 +8,9 @@
 # MAGIC   - export to Data Catalog
 # MAGIC
 # MAGIC Remaining Tasks:
-# MAGIC   - filter outliers (how many outliers?)
+# MAGIC   - more flexible outlier handling
 # MAGIC   - incorporate Marketscan
-# MAGIC   - incorporate dataset statistics (more)
+# MAGIC   - more dataset analytics
 # MAGIC   - change utilization column names up front (categories as well?)
 # MAGIC
 # MAGIC
@@ -59,7 +59,7 @@ event_df = event_df.withColumn('utc_period', F.to_date(event_df.utc_period, 'yyy
 
 # COMMAND ----------
 
-#pull in claims and utilization data (fix ingestion so total_allowed adds null as 0)
+#pull in claims and utilization data
 claims_df = pc.query_data(spark, dbutils, 'cohort_matching_cg_claims')
 claims_df = claims_df.withColumn('service_month', F.to_date(claims_df.service_month, 'yyyyMM'))
 
@@ -154,10 +154,6 @@ claims_list = ['total_allowed', 'Emergency Room']
 
 # COMMAND ----------
 
-control_subset.columns
-
-# COMMAND ----------
-
 #add claims for matching periods to both subsets and combine subsets into one dataset
 #also removes members with negative claims or utilization (data error)
 for subset in [exposed_subset, control_subset]:
@@ -227,7 +223,7 @@ continuous_variables.display()
 
 # COMMAND ----------
 
-#filter conditions
+#remove outliers
 filtered_cohorts = combined_cohorts.filter(combined_cohorts['age']>17)
 filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['age']<71)
 
@@ -246,11 +242,11 @@ filtered_cohorts.select('category', 'person_id').groupby('category').count().sho
 # COMMAND ----------
 
 #write data to table
-(
-    filtered_cohorts
-    .write
-    .format("delta")
-    .option("overwriteSchema", "true")
-    .mode("overwrite")
-    .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts")
-)
+# (
+#     filtered_cohorts
+#     .write
+#     .format("delta")
+#     .option("overwriteSchema", "true")
+#     .mode("overwrite")
+#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts")
+# )

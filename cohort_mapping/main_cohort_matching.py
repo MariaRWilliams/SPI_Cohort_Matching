@@ -1,11 +1,11 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC ###Run Matching Model
-# MAGIC - load cohorts and display stats
-# MAGIC - choose matching variables
-# MAGIC - scale, etc
+# MAGIC ##Run Matching Model
+# MAGIC Steps contained in this Notebook:
+# MAGIC - load cohort data and display stats
+# MAGIC - prepare matching variables (scale, encode, etc)
 # MAGIC - run matching algorithm
-# MAGIC - export matching index
+# MAGIC - export matched dataset with matching variables to data catalog
 
 # COMMAND ----------
 
@@ -27,10 +27,11 @@ full_df = pc.query_data(spark, dbutils, 'cohort_matching_cohorts')
 
 # COMMAND ----------
 
-#in each category: count of members, mean value, stddev, min, max of total_allowed?
-#full_df.columns
-print('Category sample size:')
-full_df.select('category', 'person_id').groupby('category').count().show()
+#stats: what else would be useful? do both before and after
+full_df.groupby('category').agg(F.count('person_id').alias('count'), 
+                                F.round(F.mean('total_allowed0'), 2).alias('avg spend at period 0'), 
+                                F.round(F.mean('age'), 2).alias('avg age')
+                                ).show()
 
 # COMMAND ----------
 
@@ -39,39 +40,28 @@ full_df.select('category', 'person_id').groupby('category').count().show()
 
 # COMMAND ----------
 
+#available variables
 full_df.columns
 
 # COMMAND ----------
 
-#select all columns used for matching here
+#select all variables to be used for matching
 id_columns = ['person_id', 'category', 'utc_period']
-binary_columns = ['depression', 'hyperlipidemia', 'osteoarthritis', 'chf', 'cancer', 'diabetes', 'cad', 'copd']
-scale_columns = ['total_allowed-1', 'total_allowed-2', 'total_allowed-3', 'total_allowed0', 'total_allowed_0to5sum', 'age']
+binary_columns = ['cancer', 'diabetes']
+scale_columns = ['total_allowed0', 'total_allowed_0to5sum', 'age']
 to_binary_columns = ['sex']
 
+final_columns = id_columns + binary_columns + scale_columns + to_binary_columns
+
 
 # COMMAND ----------
 
-#change scale columns to vector and scale
-df_with_vector = mc.create_vector(full_df, scale_columns)
-full_df_scaled = mc.scale_vector(df_with_vector)
-full_df_scaled = mc.unpack_vector(full_df_scaled, id_columns, scale_columns, 'scaledFeatures')
-
-#change cat_columns to individual columns
-full_df_cat = mc.hot_encode(full_df, to_binary_columns, id_columns)
-
-# COMMAND ----------
-
-#add scaled columns, binary columns in one dataset
-ready_df = full_df.select(*id_columns, *binary_columns)
-ready_df = ready_df.join(full_df_cat, [*id_columns], how='outer')
-ready_df = ready_df.join(full_df_scaled, [*id_columns], how='outer')
-ready_df = ready_df.na.fill(0)
-#ready_df.display()
+ready_df = mc.full_transformation(id_columns, binary_columns, scale_columns, to_binary_columns, full_df)
 
 # COMMAND ----------
 
 cols = list(set(ready_df.columns) - set(id_columns))
+# print(cols)
 
 # COMMAND ----------
 
@@ -80,71 +70,90 @@ cols = list(set(ready_df.columns) - set(id_columns))
 
 # COMMAND ----------
 
-#number of control matches to return for each exposed member
-num_matches = 5
+#analysis variables
+num_possible_matches = 10
+num_final_matches = 3
 
+#model variables
 #nlist = the number of cells to cluster the control into
-n_list = 50
-
 #nprobe = the number of cells to check for the nearest neighbors
-n_probe = 10
-
 #max_distance = (look into this one- what distance does FAISS return? euclidian?)
-max_distance = 50
+n_list = 5
+n_probe = 5
+max_distance = 20
 
 # COMMAND ----------
 
-exp_df = ready_df.filter(ready_df['category']=='Case Management')
-exp_ids = exp_df.select(*id_columns).toPandas()
-exp_vars = exp_df.select(*cols).toPandas()
+#optimize this - has to be Pandas (needs index) but overloads the kernel if too many columns
+exp_df = ready_df.filter(ready_df['category']=='Case Management').toPandas()
+exp_ids = exp_df[id_columns]
+exp_vars = exp_df[cols]
 
 # COMMAND ----------
 
-control_df = ready_df.filter(ready_df['category']=='control')
-control_ids = control_df.select(*id_columns).toPandas()
-control_vars = control_df.select(*cols).toPandas()
+control_df = ready_df.filter(ready_df['category']=='control').toPandas()
+control_ids = control_df[id_columns]
+control_vars = control_df[cols]
 
 # COMMAND ----------
 
-control_df = control_df.toPandas()
-exp_df = exp_df.toPandas()
-
-# COMMAND ----------
-
-#original code broken out
+#run similiarity search
 index = mc.create_index(control_vars, n_list)
-distances, neighbor_indexes = mc.search_index(index, exp_vars, num_matches, n_probe)
+#mc.search_index_test(index, control_vars, num_possible_matches)
+distances, neighbor_indexes = mc.search_index(index, exp_vars, num_possible_matches, n_probe)
+
+#collect matches
+matched_record = mc.pick_matches(distances, neighbor_indexes, exp_vars, max_distance, num_final_matches)
+exposed_matched, control_matched = mc.tag_matches(matched_record, control_ids, exp_ids, num_final_matches)
 
 # COMMAND ----------
 
-mc.search_index_test(index, control_vars, num_matches)
+#switch back to spark
+matched_record = spark.createDataFrame(matched_record)
+exposed_matched = spark.createDataFrame(exposed_matched)
+control_matched = spark.createDataFrame(control_matched)
 
 # COMMAND ----------
 
-#this needs to be expanded to allow for more than one match
-matched_record = mc.pick_matches(distances, neighbor_indexes, exp_vars, max_distance)
+#detail matches
+final_matched = mc.detail_matches(spark, matched_record, exposed_matched, control_matched, full_df, final_columns, id_columns, num_final_matches)
 
 # COMMAND ----------
 
-print(matched_record[(matched_record['control_index']<8000) & (matched_record['control_index']>0)])
-#print(matched_record)
+#check sample
+sample_exposed_df, sample_control_df = mc.sample_matches(final_matched, 3)
+sample_exposed_df.display()
+sample_control_df.display()
 
 # COMMAND ----------
 
-hm, hm2 = mc.tag_matches(matched_record, control_df, exp_df)
-print(hm.head())
-print(hm2.head())
+# MAGIC %md
+# MAGIC ###Final Steps: Statistics Overview and Export
 
 # COMMAND ----------
 
-hm = mc.tag_matches(matched_record, control_ids, exp_ids)
-print(hm.head())
+final_matched.groupby('category').agg(F.count('person_id').alias('count'), 
+                                F.round(F.mean('total_allowed0'), 2).alias('avg spend at period 0'), 
+                                F.round(F.mean('age'), 2).alias('avg age')
+                                ).show()
+
+# COMMAND ----------
+
+#write data to table
+# (
+#     final_matched
+#     .write
+#     .format("delta")
+#     .option("overwriteSchema", "true")
+#     .mode("overwrite")
+#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts_matched")
+# )
 
 # COMMAND ----------
 
 #reload
-import importlib
-from src import matching_class
+# import importlib
+# from src import matching_class
 
-importlib.reload(matching_class)
-mc = matching_class.Cohort_Matching()
+# importlib.reload(matching_class)
+# mc = matching_class.Cohort_Matching()
