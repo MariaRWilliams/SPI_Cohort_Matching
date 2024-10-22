@@ -52,7 +52,7 @@ full_df.columns
 #select all variables to be used for matching
 id_columns = ['person_id', 'category', 'utc_period']
 binary_columns = ['cancer', 'diabetes']
-scale_columns = ['total_allowed0', 'total_allowed_0to5sum', 'age']
+scale_columns = ['total_allowed0', 'total_allowed_-3to0sum', 'age']
 to_binary_columns = ['sex']
 
 final_columns = id_columns + binary_columns + scale_columns + to_binary_columns
@@ -144,14 +144,14 @@ final_matched.groupby('category').agg(F.count('person_id').alias('count'),
 # COMMAND ----------
 
 #write data to table
-# (
-#     final_matched
-#     .write
-#     .format("delta")
-#     .option("overwriteSchema", "true")
-#     .mode("overwrite")
-#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts_matched")
-# )
+(
+    final_matched
+    .write
+    .format("delta")
+    .option("overwriteSchema", "true")
+    .mode("overwrite")
+    .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts_matched")
+)
 
 # COMMAND ----------
 
