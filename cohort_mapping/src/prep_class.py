@@ -15,6 +15,12 @@ class Data_Prep():
         self.min_claim = 0
         self.max_claim = 0
 
+    def query_data(self, spark, dbutils, table):
+
+        df = spark.sql(f"""SELECT * FROM dev.`clinical-analysis`.{table}""")
+
+        return df
+
     def set_event_categories(self, event_df):
 
         self.event_list = event_df.select(F.collect_set('category').alias('category')).first()['category']
@@ -35,12 +41,6 @@ class Data_Prep():
 
         self.min_claim = claims_df.agg(F.min('service_month')).collect()[0][0]
         self.max_claim = datetime.datetime.strptime(claims_cap, '%Y-%m-%d')
-    
-    def query_data(self, spark, dbutils, table):
-
-        df = spark.sql(f"""SELECT * FROM dev.`clinical-analysis`.{table}""")
-
-        return df
        
     def clean_exposed(self, spark_c, event_df, exposed_categories, preperiod, postperiod):
 

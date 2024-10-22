@@ -6,6 +6,10 @@
 # MAGIC - prepare matching variables (scale, encode, etc)
 # MAGIC - run matching algorithm
 # MAGIC - export matched dataset with matching variables to data catalog
+# MAGIC
+# MAGIC Pending Updates:
+# MAGIC - be able to restrict to perfect matches on chosen variables
+# MAGIC - resolve kernel crashing on many columns
 
 # COMMAND ----------
 
