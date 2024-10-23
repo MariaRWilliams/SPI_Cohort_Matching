@@ -36,14 +36,16 @@ class QueryClass():
 
         q = f"""
             select dw_member_id
+                , ins_emp_group_name                  as dw_customer_nm
                 , udf26_eligibility                   as person_id
                 , to_char(mbr_dob, 'YYYYMM')          as birth_year
                 , mbr_gender                          as sex
                 , mbr_msa                             as msa
                 , mbr_state                           as state
                 , mbr_region_name                     as region
+                , mbr_zip                             as zip_code
                 , ins_plan_type_desc                  as plan_type
-                , ins_emp_group_name                  as customer_nm
+                , ins_carrier_name                    as carrier
                 , min(ins_med_eff_date)               as start_date
                 , case
                     when max(ins_med_term_date) > current_date
@@ -97,7 +99,9 @@ class QueryClass():
                FROM     {schema}.utilization
     	       WHERE    to_char(servicedate, 'YYYY') >= '{start_year}'
                         AND categorydescription in ('Emergency Room','Physician-Specialist Visit',
-                                                    'Physician-PCP Visit','Physician-Preventive','Outpatient Urgent Care'
+                                                    'Physician-PCP Visit','Physician-Preventive','Outpatient Urgent Care',
+                                                    'Physician-Telehealth', 'Inpatient Medical','Inpatient Surgical',
+                                                    'Office Procedures', 'Outpatient Services'
                                                 )
                 GROUP BY 1, 2, 3, 4
             """

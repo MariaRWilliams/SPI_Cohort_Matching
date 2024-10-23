@@ -15,6 +15,12 @@ class Data_Prep():
         self.min_claim = 0
         self.max_claim = 0
 
+    def query_data(self, spark, dbutils, table):
+
+        df = spark.sql(f"""SELECT * FROM dev.`clinical-analysis`.{table}""")
+
+        return df
+
     def set_event_categories(self, event_df):
 
         self.event_list = event_df.select(F.collect_set('category').alias('category')).first()['category']
@@ -35,14 +41,11 @@ class Data_Prep():
 
         self.min_claim = claims_df.agg(F.min('service_month')).collect()[0][0]
         self.max_claim = datetime.datetime.strptime(claims_cap, '%Y-%m-%d')
-    
-    def query_data(self, spark, dbutils, table):
-
-        df = spark.sql(f"""SELECT * FROM dev.`clinical-analysis`.{table}""")
-
-        return df
        
-    def clean_exposed(self, spark_c, event_df, exposed_categories, preperiod, postperiod):
+    def clean_exposed(self, spark_c, event_df, exposed_categories, exclude_categories, preperiod, postperiod):
+
+        keep = exposed_categories + exclude_categories
+        event_df = event_df.filter(event_df.category.isin(keep))
 
         df_schema = event_df.select('person_id', 'utc_period', 'category').schema
         exposed_df = spark_c.createDataFrame(spark_c.sparkContext.emptyRDD(), df_schema)
@@ -52,7 +55,8 @@ class Data_Prep():
             cat_df = cat_df.withColumn('preperiod', F.add_months(cat_df.utc_period, -preperiod))
             cat_df = cat_df.withColumn('postperiod', F.add_months(cat_df.utc_period, postperiod))
 
-            other_df = event_df.filter(event_df.category!=category)
+            ex_cat = list(set(exclude_categories) - set([category]))
+            other_df = event_df.filter(event_df.category.isin(ex_cat))
             other_df = other_df.selectExpr('person_id as other_person_id', 'utc_period as other_period', 'category as other_category')
 
             condition_list = [cat_df.person_id == other_df.other_person_id,
@@ -149,9 +153,36 @@ class Data_Prep():
 
         return df_pivot
     
+    def filter_claims(self, df, col_list):
+
+        col_list = [x.lower() for x in col_list]
+        col_list = [x.replace(' ', '_') for x in col_list]
+
+        selected_columns = []
+        for c in col_list:
+            selected_columns = selected_columns + [column for column in df.columns if column.startswith(c)]
+
+        df = df.filter(F.least(*[F.col(c) >= 0 for c in selected_columns]) == True)
+
+        return df
+    
     def calc_age(self, df):
 
-        df = df.withColumn('age', )
+        df = df.withColumn('age', F.round(F.months_between(df['utc_period'], df['birth_year'])/12, 0).cast('integer'))
+
+        return df
+    
+    def sum_periods(self, df, col_list, preperiod, postperiod):
+
+        col_list = [x.lower() for x in col_list]
+        col_list = [x.replace(' ', '_') for x in col_list]
+        
+        for c in col_list:
+            col_nm = c+'_'+str(preperiod)+'to'+str(postperiod)+'sum'
+            df = df.withColumn(col_nm, F.lit(0))
+            
+            for n in range(preperiod, postperiod):
+                df = df.withColumn(col_nm, F.round(df[col_nm]+ df[c+str(n)], 2))
 
         return df
 

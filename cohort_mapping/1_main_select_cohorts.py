@@ -1,13 +1,19 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC - DataPrep
-# MAGIC   - load data
-# MAGIC   - choose 'exposed' / 'control'
-# MAGIC   - arrange
-# MAGIC - Cohort Matching
-# MAGIC   - scale, etc. to prep for matching
-# MAGIC   - run matching algorithm
-# MAGIC   - export matching data
+# MAGIC ##Create Datasets for Event Subset and Control Subset
+# MAGIC Steps Contained in this Notebook:
+# MAGIC   - load and clean data
+# MAGIC   - choose 'exposed' / 'control' subsets from Accolade data or Marketscan
+# MAGIC   - manipulate matching variables
+# MAGIC   - export to Data Catalog
+# MAGIC
+# MAGIC Remaining Tasks:
+# MAGIC   - more flexible outlier handling
+# MAGIC   - incorporate Marketscan
+# MAGIC   - more dataset analytics
+# MAGIC   - change utilization column names up front (categories as well?)
+# MAGIC
+# MAGIC
 
 # COMMAND ----------
 
@@ -16,11 +22,12 @@ from pyspark.sql.functions import to_date
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
 from pyspark.sql import DataFrame
-from src import matching_class
 from src import prep_class
+from src import data_class
 import pandas as pd
 
 pc = prep_class.Data_Prep()
+dec = data_class.Data_Stats()
 
 # COMMAND ----------
 
@@ -34,7 +41,7 @@ eval_postperiod = 5
 
 #cohort matching window: what months should we consider for matching?
 match_preperiod = 3
-match_postperiod = 0
+match_postperiod = 5
 
 #claims max: what month is the max to expect correct claim data?
 claims_cap = '2024-08-01'
@@ -52,7 +59,7 @@ event_df = event_df.withColumn('utc_period', F.to_date(event_df.utc_period, 'yyy
 
 # COMMAND ----------
 
-#pull in claims and utilization data (fix ingestion so total_allowed adds null as 0)
+#pull in claims and utilization data
 claims_df = pc.query_data(spark, dbutils, 'cohort_matching_cg_claims')
 claims_df = claims_df.withColumn('service_month', F.to_date(claims_df.service_month, 'yyyyMM'))
 
@@ -62,6 +69,7 @@ claims_df = claims_df.withColumn('service_month', F.to_date(claims_df.service_mo
 mem_df = pc.query_data(spark, dbutils, 'cohort_matching_cg_mem')
 mem_df = mem_df.withColumn('start_date', F.trunc(F.to_date(mem_df.start_date, 'yyyyMM'), 'month'))
 mem_df = mem_df.withColumn('end_date', F.trunc(F.to_date(mem_df.end_date, 'yyyyMM'), 'month'))
+mem_df = mem_df.withColumn('birth_year', F.trunc(F.to_date(mem_df.birth_year, 'yyyyMM'), 'month'))
 
 # COMMAND ----------
 
@@ -71,7 +79,6 @@ pc.set_event_categories(event_df)
 pc.set_util_categories(claims_df)
 pc.set_claims_window(claims_df, claims_cap)
 
-
 # COMMAND ----------
 
 # MAGIC %md
@@ -79,19 +86,30 @@ pc.set_claims_window(claims_df, claims_cap)
 
 # COMMAND ----------
 
-#available event categories to choose from 
+#available event categories
 print(pc.event_list)
 
 # COMMAND ----------
 
 #select event categories to use in exposed subset
-exposed_categories = ['Case Management','High Cost Claimants (HCC)']
+#select categories that should disqualify members from the exposed cohort (within clean window)
+exposed_categories = ['Case Management','High Cost Claimants (HCC)', 'HCC Clinical Engagement']
+clean_categories = ['Disease Management', 'Treatment Decision Support', 'Maternity Program']
+
+# COMMAND ----------
+
+# these lines bring in the code again if updated after original run
+import pyspark.sql.functions as F
+import importlib
+import src.prep_class as prep_class
+
+importlib.reload(prep_class)
+pc = prep_class.Data_Prep()
 
 # COMMAND ----------
 
 #limit exposed cohort to the chosen categories, without any other events in clean window
-exposed_subset = event_df.filter(event_df.category!='exclude')
-exposed_subset = pc.clean_exposed(spark, exposed_subset, exposed_categories, clean_preperiod, clean_postperiod)
+exposed_subset = pc.clean_exposed(spark, event_df, exposed_categories, clean_categories, clean_preperiod, clean_postperiod)
 
 # COMMAND ----------
 
@@ -137,33 +155,22 @@ control_subset = pc.generate_control(spark, control_subset, eval_preperiod, eval
 
 # COMMAND ----------
 
-# these lines bring in the code again if updated after original run
-import pyspark.sql.functions as F
-import importlib
-import src.prep_class as prep_class
-
-importlib.reload(prep_class)
-pc = prep_class.Data_Prep()
-
-pc.set_claims_window(claims_df, claims_cap)
-print("Minimum Claim: " + str(pc.min_claim))
-print("Maximum Claim: " + str(pc.max_claim))
-
-# COMMAND ----------
-
-#available claims data to choose from
+#available claims categories to choose from
 print(pc.util_list)
 
 # COMMAND ----------
 
-#select claims to add as matching variables
-claims_list = ['total_allowed', 'Emergency Room']
+#select claims categories to add as matching variables: all these will be added in leading and trailing periods
+claims_list = ['med_allowed', 'pharma_allowed', 'total_allowed', 'Emergency Room']
 
 # COMMAND ----------
 
+#add claims for matching periods to both subsets and combine subsets into one dataset
+#also removes members with negative claims or utilization (data error)
 for subset in [exposed_subset, control_subset]:
     subset_claims = pc.merge_claims(spark, subset, claims_df, match_preperiod, match_postperiod)
     subset_claims = pc.pivot_claims(subset_claims, claims_list)
+    subset_claims = pc.filter_claims(subset_claims, claims_list)
     subset_joined = subset.join(subset_claims, ['dw_member_id', 'utc_period'], how='inner')
 
     if subset == exposed_subset:
@@ -186,8 +193,57 @@ combined_cohorts.select('category', 'person_id').groupby('category').count().sho
 
 # COMMAND ----------
 
-combined_cohorts.columns
+#add age
+combined_cohorts = pc.calc_age(combined_cohorts)
 
 # COMMAND ----------
 
-combined_cohorts = pc.calc_age(combined_cohorts)
+#add sums for certain periods: runup, postperiod, etc
+combined_cohorts = pc.sum_periods(combined_cohorts, claims_list, -match_preperiod, 0)
+combined_cohorts = pc.sum_periods(combined_cohorts, claims_list, 0, eval_postperiod)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ###Remove Outliers
+
+# COMMAND ----------
+
+cc_sample = combined_cohorts.limit(100)
+
+# COMMAND ----------
+
+#stats for numeric, non-binary columns
+#continuous_variables = dec.num_col_stats(cc_sample, threshold_multiplier=3)
+continuous_variables = dec.num_col_stats(combined_cohorts, threshold_multiplier=3)
+continuous_variables.display()
+
+# COMMAND ----------
+
+#remove outliers
+filtered_cohorts = combined_cohorts.filter(combined_cohorts['age']>17)
+filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['age']<71)
+
+for x in range(-3, 6):
+    filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_allowed'+str(x)]<250000)
+
+# COMMAND ----------
+
+filtered_cohorts.select('category', 'person_id').groupby('category').count().show()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ###Write data to table
+
+# COMMAND ----------
+
+#write data to table
+(
+    filtered_cohorts
+    .write
+    .format("delta")
+    .option("overwriteSchema", "true")
+    .mode("overwrite")
+    .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts")
+)
