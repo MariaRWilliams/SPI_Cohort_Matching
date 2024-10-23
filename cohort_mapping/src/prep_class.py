@@ -42,7 +42,10 @@ class Data_Prep():
         self.min_claim = claims_df.agg(F.min('service_month')).collect()[0][0]
         self.max_claim = datetime.datetime.strptime(claims_cap, '%Y-%m-%d')
        
-    def clean_exposed(self, spark_c, event_df, exposed_categories, preperiod, postperiod):
+    def clean_exposed(self, spark_c, event_df, exposed_categories, exclude_categories, preperiod, postperiod):
+
+        keep = exposed_categories + exclude_categories
+        event_df = event_df.filter(event_df.category.isin(keep))
 
         df_schema = event_df.select('person_id', 'utc_period', 'category').schema
         exposed_df = spark_c.createDataFrame(spark_c.sparkContext.emptyRDD(), df_schema)
@@ -52,7 +55,8 @@ class Data_Prep():
             cat_df = cat_df.withColumn('preperiod', F.add_months(cat_df.utc_period, -preperiod))
             cat_df = cat_df.withColumn('postperiod', F.add_months(cat_df.utc_period, postperiod))
 
-            other_df = event_df.filter(event_df.category!=category)
+            ex_cat = list(set(exclude_categories) - set([category]))
+            other_df = event_df.filter(event_df.category.isin(ex_cat))
             other_df = other_df.selectExpr('person_id as other_person_id', 'utc_period as other_period', 'category as other_category')
 
             condition_list = [cat_df.person_id == other_df.other_person_id,

@@ -1,7 +1,12 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC ##Data Ingestion for EDW Data
-# MAGIC Exports table to data catalog.
+# MAGIC Steps Contained in this Notebook:
+# MAGIC - import libraries and establish connections
+# MAGIC - get customer list from CG table 
+# MAGIC   - this is to limit the query to members for whom we have claims data
+# MAGIC - query edw cluster
+# MAGIC - write results to data catalog
 
 # COMMAND ----------
 
@@ -15,6 +20,20 @@ import re
 #static input variables
 EDW_USER = dbutils.secrets.get(scope="clinical-analysis", key="edw-service")
 EDW_PASSWORD = dbutils.secrets.get(scope="clinical-analysis", key="edw-password")
+
+# COMMAND ----------
+
+# MAGIC %run /Workspace/common/spokes/edw-spoke
+
+# COMMAND ----------
+
+spark_reader = EDWSpoke(EDW_USER, EDW_PASSWORD).connect()
+start_year = '2023'
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ###Query data
 
 # COMMAND ----------
 
@@ -39,33 +58,52 @@ print(str(len(cust_list))+" Customer(s) selected")
 
 # COMMAND ----------
 
-# MAGIC %run /Workspace/common/spokes/edw-spoke
-
-# COMMAND ----------
-
-spark_reader = EDWSpoke(EDW_USER, EDW_PASSWORD).connect()
-start_year = '2023'
-
-# COMMAND ----------
-
 #query edw events
 qc = query_class_edw.QueryClass()
-q = qc.query_spi_events(start_year, cust_list_string)
+#q = qc.query_spi_events(start_year, cust_list_string)
+q = qc.query_hcc_clinical_events(start_year, cust_list_string)
 s_df = spark_reader.option('query', q).load()
 
 #check
-edw_df= s_df.toPandas()
-print(edw_df.head())
-#print(edw_df['org_nm'].unique().tolist())
+s_df.show(5)
 
 # COMMAND ----------
 
-#write data to table
+# MAGIC %md
+# MAGIC ###Write to data catalog
+
+# COMMAND ----------
+
+#overwrite table with data
+# (
+#     s_df
+#     .write
+#     .format("delta")
+#     .option("overwriteSchema", "true")
+#     .mode("overwrite")
+#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_edw_events")
+# )
+
+# COMMAND ----------
+
+#append data to table (will add columns if not already present)
 (
     s_df
     .write
     .format("delta")
-    .option("overwriteSchema", "true")
-    .mode("overwrite")
+    .option("mergeSchema", "true")
+    .mode("append")
     .saveAsTable("dev.`clinical-analysis`.cohort_matching_edw_events")
 )
+
+# COMMAND ----------
+
+# these lines bring in the code again if updated after original run
+# import importlib
+# from src import query_class_edw
+# from src import helper_class
+
+# importlib.reload(query_class_edw)
+# importlib.reload(helper_class)
+
+# qc = query_class_edw.QueryClass()

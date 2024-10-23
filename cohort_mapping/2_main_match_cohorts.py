@@ -53,7 +53,16 @@ full_df.columns
 #select all variables to be used for matching
 id_columns = ['person_id', 'category', 'utc_period']
 binary_columns = ['depression', 'hyperlipidemia', 'osteoarthritis', 'chf', 'cancer', 'diabetes', 'cad', 'copd']
-scale_columns = ['total_allowed-1','total_allowed-2','total_allowed-3','total_allowed0', 'age']
+scale_columns = ['age',
+                'total_allowed-1',
+                'total_allowed-2',
+                'total_allowed-3',
+                'total_allowed0',
+                'med_allowed_-3to0sum',
+                'pharma_allowed_-3to0sum',
+                'total_allowed_-3to0sum',
+                'emergency_room_-3to0sum'
+                ]
 to_binary_columns = ['sex', 'region']
 
 final_columns = id_columns + binary_columns + scale_columns + to_binary_columns
@@ -71,43 +80,57 @@ cols = list(set(ready_df.columns) - set(id_columns))
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ###Matching Algorithm
+# MAGIC ###Matching Algorithm: Create Control Index
 
 # COMMAND ----------
 
 #analysis variables
 num_possible_matches = 10
-num_final_matches = 3
+num_final_matches = 2
 
 #model variables
-#nlist = the number of cells to cluster the control into
+#nlist = the number of cells to cluster the control into (4 * sqrt(n) is standard?)
 #nprobe = the number of cells to check for the nearest neighbors
 #max_distance = (look into this one- what distance does FAISS return? euclidian?)
-n_list = 5
-n_probe = 5
-max_distance = 20
+n_list = 5000
+n_probe = 2500
+max_distance = 5
 
 # COMMAND ----------
 
-#optimize this - has to be Pandas (needs index) but overloads the kernel if too many columns
-exp_df = ready_df.filter(ready_df['category']=='Case Management').toPandas()
-exp_ids = exp_df[id_columns]
-exp_vars = exp_df[cols]
-
-# COMMAND ----------
-
+#pull out control - may need to optimize since many rows seem to crash kernel
 control_df = ready_df.filter(ready_df['category']=='control').toPandas()
 control_ids = control_df[id_columns]
 control_vars = control_df[cols]
 
 # COMMAND ----------
 
-#run similiarity search
+#create index of control members
 index = mc.create_index(control_vars, n_list)
 #mc.search_index_test(index, control_vars, num_possible_matches)
-distances, neighbor_indexes = mc.search_index(index, exp_vars, num_possible_matches, n_probe)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ###Matching Algorithm: Cohort Similarity Search
+
+# COMMAND ----------
+
+#possible exposed cohorts
+print(ready_df.select('category').distinct().toPandas()['category'].to_list())
+
+# COMMAND ----------
+
+#seemed better to process one cohort at a time
+cohort = 'HCC Clinical Engagement'
+exp_df = ready_df.filter(ready_df['category']==cohort).toPandas()
+exp_ids = exp_df[id_columns]
+exp_vars = exp_df[cols]
+
+# COMMAND ----------
 
 #collect matches
+distances, neighbor_indexes = mc.search_index(index, exp_vars, num_possible_matches, n_probe)
 matched_record = mc.pick_matches(distances, neighbor_indexes, exp_vars, max_distance, num_final_matches)
 exposed_matched, control_matched = mc.tag_matches(matched_record, control_ids, exp_ids, num_final_matches)
 
@@ -141,6 +164,11 @@ final_matched.groupby('category').agg(F.count('person_id').alias('count'),
                                 F.round(F.mean('total_allowed0'), 2).alias('avg spend at period 0'), 
                                 F.round(F.mean('age'), 2).alias('avg age')
                                 ).show()
+
+# COMMAND ----------
+
+#add to final table
+
 
 # COMMAND ----------
 

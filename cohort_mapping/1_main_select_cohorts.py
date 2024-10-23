@@ -23,11 +23,11 @@ import pyspark.sql.functions as F
 import pyspark.sql.types as T
 from pyspark.sql import DataFrame
 from src import prep_class
-from src import data_exploration_class
+from src import data_class
 import pandas as pd
 
 pc = prep_class.Data_Prep()
-dec = data_exploration_class.Data_Stats()
+dec = data_class.Data_Stats()
 
 # COMMAND ----------
 
@@ -92,13 +92,24 @@ print(pc.event_list)
 # COMMAND ----------
 
 #select event categories to use in exposed subset
-exposed_categories = ['Case Management','High Cost Claimants (HCC)']
+#select categories that should disqualify members from the exposed cohort (within clean window)
+exposed_categories = ['Case Management','High Cost Claimants (HCC)', 'HCC Clinical Engagement']
+clean_categories = ['Disease Management', 'Treatment Decision Support', 'Maternity Program']
+
+# COMMAND ----------
+
+# these lines bring in the code again if updated after original run
+import pyspark.sql.functions as F
+import importlib
+import src.prep_class as prep_class
+
+importlib.reload(prep_class)
+pc = prep_class.Data_Prep()
 
 # COMMAND ----------
 
 #limit exposed cohort to the chosen categories, without any other events in clean window
-exposed_subset = event_df.filter(event_df.category!='exclude')
-exposed_subset = pc.clean_exposed(spark, exposed_subset, exposed_categories, clean_preperiod, clean_postperiod)
+exposed_subset = pc.clean_exposed(spark, event_df, exposed_categories, clean_categories, clean_preperiod, clean_postperiod)
 
 # COMMAND ----------
 
@@ -150,7 +161,7 @@ print(pc.util_list)
 # COMMAND ----------
 
 #select claims categories to add as matching variables: all these will be added in leading and trailing periods
-claims_list = ['total_allowed', 'Emergency Room']
+claims_list = ['med_allowed', 'pharma_allowed', 'total_allowed', 'Emergency Room']
 
 # COMMAND ----------
 
@@ -198,20 +209,6 @@ combined_cohorts = pc.sum_periods(combined_cohorts, claims_list, 0, eval_postper
 
 # COMMAND ----------
 
-# these lines bring in the code again if updated after original run
-# import pyspark.sql.functions as F
-# import importlib
-# import src.prep_class as prep_class
-# from src import data_exploration_class
-
-# importlib.reload(prep_class)
-# pc = prep_class.Data_Prep()
-
-# importlib.reload(data_exploration_class)
-# dec = data_exploration_class.Data_Stats()
-
-# COMMAND ----------
-
 cc_sample = combined_cohorts.limit(100)
 
 # COMMAND ----------
@@ -242,11 +239,11 @@ filtered_cohorts.select('category', 'person_id').groupby('category').count().sho
 # COMMAND ----------
 
 #write data to table
-# (
-#     filtered_cohorts
-#     .write
-#     .format("delta")
-#     .option("overwriteSchema", "true")
-#     .mode("overwrite")
-#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts")
-# )
+(
+    filtered_cohorts
+    .write
+    .format("delta")
+    .option("overwriteSchema", "true")
+    .mode("overwrite")
+    .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts")
+)
