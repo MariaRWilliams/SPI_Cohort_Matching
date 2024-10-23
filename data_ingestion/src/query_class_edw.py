@@ -14,7 +14,7 @@ class QueryClass():
               , case when sd.savings_category in 
                      ('High Cost Claimants (HCC)', 'Case Management', 'Disease Management',
                      'Maternity Program', 'Treatment Decision Support') then sd.savings_category
-                     else 'exclude' end as category
+                     else 'other_SPI_event' end as category
               FROM acp_edw.info_layer.v1_uat_spi_dtl sd
               inner join acp_edw.info_layer.prs_mbrshp_covrg pmc on 
                      upper(sd.drvd_mbrshp_covrg_id) = upper(pmc.drvd_mbrshp_covrg_id) and 
@@ -28,25 +28,24 @@ class QueryClass():
     def query_hcc_clinical_events(self, start_year, customer_list):
 
         q = f"""
-                with #first_hcc as (select prs.drvd_mbrshp_covrg_id        as hcc_id
-                                        , prs.person_id
-                                        , prs.org_nm
-                                        , left(ca.adjudication_period, 4) as hcc_yr
-                                        , min(ca.adjudication_period)     as hcc_mo
-                                    from info_layer.prs_mbrshp_covrg prs
-                                            join info_layer.v1_uat_svc_ytd_mbr_clms_agg ca
+                with #first_hcc as (select distinct prs.drvd_mbrshp_covrg_id        as hcc_id
+                                                , prs.person_id
+                                                , left(ca.adjudication_period, 4) as hcc_yr
+                                                , min(ca.adjudication_period)     as hcc_mo
+                                    from acp_edw.info_layer.prs_mbrshp_covrg prs
+                                            join acp_edw.info_layer.v1_uat_svc_ytd_mbr_clms_agg ca
                                                 on prs.drvd_mbrshp_covrg_id = ca.drvd_mbrshp_covrg_id and
                                                     prs.utc_period = ca.adjudication_period
                                     where ca.hcc_flg = true
                                     and prs.acp_mbr_flg = 1
-                                    and prs.utc_period >= '{start_year}' 
+                                    and left(prs.utc_period, 4) >= '{start_year}' 
                                     and prs.org_nm in ('{customer_list}')
-                                    group by 1, 2, 3, 4)
-                , #first_clin_eng as (select mc.drvd_mbrshp_covrg_id as eng_id
+                                    group by 1, 2, 3)
+                , #first_clin_eng as (select distinct mc.drvd_mbrshp_covrg_id as eng_id
                                                     , left(mc.utc_period, 4)  as eng_yr
                                                     , min(mc.utc_period)      as eng_mo
-                                        from info_layer.mstr_comm mc
-                                                inner join info_layer.task_dtl td ON td.enctr_id = mc.enctr_id AND
+                                        from acp_edw.info_layer.mstr_comm mc
+                                                inner join acp_edw.info_layer.task_dtl td ON td.enctr_id = mc.enctr_id AND
                                                                                     td.task_cd = 'issue' AND
                                                                                     td.task_sts NOT IN
                                                                                     ('duplicate', 'rejected', 'cancelled',
@@ -55,10 +54,10 @@ class QueryClass():
                                                                                     td.objtv_category = 'Care' AND
                                                                                     (td.objtv_type_nm = 'Other Care Education') is false
                                         WHERE mc.clinical_engmnt_flg = 1
-                                        and mc.utc_period >= '{start_year}' 
+                                        and left(mc.utc_period, 4) >= '{start_year}' 
                                         and mc.drvd_org_nm in ('{customer_list}')
                                         group by 1, 2)
-                select distinct fc.person_id
+                select fc.person_id
                     , fc.hcc_id as drvd_mbrshp_covrg_id
                     , fe.eng_mo as utc_period
                     , 'HCC Clinical Engagement' as category
