@@ -14,7 +14,7 @@ file_path = 'data_ingestion/src_data/'
 #next update, change queries to equals instead of >=
 #this will allow us to pull data in chunks
 start_year = '2023'
-export_ver = '02'
+export_ver = '03'
 
 from warnings import filterwarnings
 filterwarnings("ignore", category=UserWarning, message='.*pandas only supports SQLAlchemy connectable.*')
