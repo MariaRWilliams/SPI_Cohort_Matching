@@ -60,5 +60,17 @@ class CG_Helper():
         
         #return
         return customer_df[['table_schema', 'acronym', 'edw_cust', 'cg_cust', 'num_cust']]
+    
+    def map_customers_member(self, member_df, customer_df):
         
+        member_df = self.map_customers(member_df, 'dw_customer_nm')
+        cdf = customer_df[customer_df['num_cust']==1]
+        
+        member_df = member_df.merge(cdf, on='table_schema', how='left')
+        member_df.loc[member_df['edw_cust_x'].isin(['BK', 'NON-ACCOLADE', 'ACCOLADE', 'BLANK']), 'edw_cust_x'] = None
+        member_df['edw_cust'] = member_df['edw_cust_x'].fillna(member_df['edw_cust_y'])
+        
+        member_df = member_df.drop(columns = ['edw_cust_x', 'edw_cust_y', 'table_schema', 'acronym', 'cg_cust', 'num_cust', 'dw_customer_nm'])
+                
+        return member_df
         

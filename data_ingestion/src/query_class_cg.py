@@ -32,7 +32,7 @@ class QueryClass():
 
         return q
         
-    def query_demographics(self, schema, start_year):
+    def query_demographics(self, schema, svc_year):
 
         q = f"""
             select dw_member_id
@@ -52,41 +52,42 @@ class QueryClass():
                         then current_date
                     else max(ins_med_term_date) end as end_date
             from {schema}.eligibility
-            where to_char(ins_med_term_date, 'YYYY') >= '{start_year}'
-            group by 1,2,3,4,5,6,7,8,9
+            where to_char(ins_med_term_date, 'YYYY') >= '{svc_year}'
+            and to_char(ins_med_eff_date, 'YYYY') <= '{svc_year}'
+            group by 1,2,3,4,5,6,7,8,9,10,11
             """
               
         return q
     
-    def query_med_claims(self, schema, start_year):
+    def query_med_claims(self, schema, svc_year):
 
         q = f"""
             select to_char(svc_service_frm_date, 'YYYYMM') as service_month
                 , dw_member_id
                 , sum(rev_allowed_amt)                     as med_allowed
             from {schema}.medical
-            where to_char(svc_service_frm_date, 'YYYY') >= '{start_year}'
+            where to_char(svc_service_frm_date, 'YYYY') = '{svc_year}'
             and rev_allowed_amt != 0
             group by 1, 2
             """
               
         return q
 
-    def query_pharma_claims(self, schema, start_year):
+    def query_pharma_claims(self, schema, svc_year):
 
         q = f"""
             select to_char(svc_service_frm_date, 'YYYYMM') as service_month
                 , dw_member_id
                 , sum(rev_allowed_amt)                     as pharma_allowed
             from {schema}.pharmacy	
-            where to_char(svc_service_frm_date, 'YYYY') >= '{start_year}'
+            where to_char(svc_service_frm_date, 'YYYY') = '{svc_year}'
             and rev_allowed_amt != 0
             group by 1, 2
             """
               
         return q
     
-    def query_utilization(self, schema, start_year):
+    def query_utilization(self, schema, svc_year):
 
         q = f"""
                SELECT   dw_member_id,
@@ -97,7 +98,7 @@ class QueryClass():
     	                     when eventtype = 'Reversal' then -count(distinct dw_member_id || servicedate || primaryprovidernpi)
     	                     else 0 end as count_units
                FROM     {schema}.utilization
-    	       WHERE    to_char(servicedate, 'YYYY') >= '{start_year}'
+    	       WHERE    to_char(servicedate, 'YYYY') = '{svc_year}'
                         AND categorydescription in ('Emergency Room','Physician-Specialist Visit',
                                                     'Physician-PCP Visit','Physician-Preventive','Outpatient Urgent Care',
                                                     'Physician-Telehealth', 'Inpatient Medical','Inpatient Surgical',
@@ -108,7 +109,7 @@ class QueryClass():
               
         return q
     
-    def query_conditions(self, schema, start_year):
+    def query_conditions(self, schema, svc_year):
         
         q = f"""
                 select dw_member_id
@@ -169,7 +170,7 @@ class QueryClass():
                         else 0
                 end) as COPD
             from {schema}.medical
-            where to_char(svc_service_frm_date, 'YYYY') >= '{start_year}'
+            where to_char(svc_service_frm_date, 'YYYY') = '{svc_year}'
             group by 1
             having  depression+hyperlipidemia+osteoarthritis+cancer+CHF+diabetes+CAD+COPD >= 1
             """
