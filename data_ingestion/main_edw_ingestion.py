@@ -61,7 +61,9 @@ print(str(len(cust_list))+" Customer(s) selected")
 #query edw events
 qc = query_class_edw.QueryClass()
 #q = qc.query_spi_events(start_year, cust_list_string)
-q = qc.query_hcc_clinical_events(start_year, cust_list_string)
+#q = qc.query_hcc_clinical_events(start_year, cust_list_string)
+#q = qc.query_funnel(start_year, cust_list_string)
+q = qc.query_eng_events(start_year, cust_list_string)
 s_df = spark_reader.option('query', q).load()
 
 #check
@@ -87,14 +89,14 @@ s_df.show(5)
 # COMMAND ----------
 
 #append data to table (will add columns if not already present)
-(
-    s_df
-    .write
-    .format("delta")
-    .option("mergeSchema", "true")
-    .mode("append")
-    .saveAsTable("dev.`clinical-analysis`.cohort_matching_edw_events")
-)
+# (
+#     s_df
+#     .write
+#     .format("delta")
+#     .option("mergeSchema", "true")
+#     .mode("append")
+#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_edw_events")
+# )
 
 # COMMAND ----------
 

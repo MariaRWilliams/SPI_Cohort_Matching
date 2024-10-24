@@ -130,13 +130,23 @@ class Data_Prep():
        
         return df
     
-    def pivot_claims(self, df, col_list):
+    def pivot_claims(self, df, leading_list, trailing_list):
 
+        col_list = list(set(leading_list+trailing_list))
         df = df.withColumn('mo_seq', F.round(F.months_between(df['service_month'], df['utc_period']), 0).cast('integer'))
+        
         df_pivot = df.select('dw_member_id', 'utc_period').dropDuplicates()
-
         for c in col_list:
+            seq_start = 0
+            seq_end = 0
+
+            if c in leading_list: 
+                seq_start = df.agg(F.min('mo_seq')).collect()[0][0]
+            if c in trailing_list: 
+                seq_end = df.agg(F.max('mo_seq')).collect()[0][0]
+
             time_set = (df.withColumn('mo_pivot',  F.concat(F.lit(c), F.col('mo_seq')))
+                        .filter((F.col('mo_seq')>=seq_start) & (F.col('mo_seq')<=seq_end))
                         .groupBy(['dw_member_id', 'utc_period'])
                         .pivot('mo_pivot')
                         .agg(F.round(F.first(c), 2))
@@ -153,7 +163,9 @@ class Data_Prep():
 
         return df_pivot
     
-    def filter_claims(self, df, col_list):
+    def remove_negatives(self, df, leading_list, trailing_list):
+
+        col_list = list(set(leading_list+trailing_list))
 
         col_list = [x.lower() for x in col_list]
         col_list = [x.replace(' ', '_') for x in col_list]
