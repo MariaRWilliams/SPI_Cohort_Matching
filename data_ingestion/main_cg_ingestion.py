@@ -11,7 +11,7 @@ cg_queries = QueryClass()
 cg_helper = CG_Helper()
 file_path = 'data_ingestion/src_data/'
 
-svc_year = '2024'
+svc_year = '2023'
 export_ver = '04'
 
 from warnings import filterwarnings
@@ -83,7 +83,7 @@ for x in cust_df['table_schema'].unique().tolist():
     
 member_df = cg_helper.map_customers_member(member_df, cust_df)
 
-claims_df.to_parquet(file_path+'cg_mo_data_'+str(svc_year)+str(export_ver)+'.parquet', index=False)
-member_df.to_parquet(file_path+'cg_mem_data_'+str(svc_year)+str(export_ver)+'.parquet', index=False)
+claims_df.to_parquet(file_path+'cg_claims_data_'+str(svc_year)+'_'+str(export_ver)+'.parquet', index=False)
+member_df.to_parquet(file_path+'cg_mem_data_'+str(svc_year)+'_'+str(export_ver)+'.parquet', index=False)
 
 cg_conn.dispose()
