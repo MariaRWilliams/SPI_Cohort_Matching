@@ -15,6 +15,7 @@ class QueryClass():
                      ('High Cost Claimants (HCC)', 'Case Management', 'Disease Management',
                      'Maternity Program', 'Treatment Decision Support') then sd.savings_category
                      else 'other_SPI_event' end as category
+             , 'spi_definition' as sub_category
               FROM acp_edw.info_layer.v1_uat_spi_dtl sd
               inner join acp_edw.info_layer.prs_mbrshp_covrg pmc on 
                      upper(sd.drvd_mbrshp_covrg_id) = upper(pmc.drvd_mbrshp_covrg_id) and 
@@ -60,12 +61,39 @@ class QueryClass():
                 select fc.person_id
                     , fc.hcc_id as drvd_mbrshp_covrg_id
                     , fe.eng_mo as utc_period
-                    , 'HCC Clinical Engagement' as category
-                    , case when hcc_mo > eng_mo then 0 else 1 end as hcc_at_eng
+                    , 'HCC Clinical Eng' end as category
+                    , case when hcc_mo > eng_mo 'pre-hcc'
+                            else 'post-hcc' end as sub_category
                 from #first_hcc fc
                         inner join #first_clin_eng fe on fc.hcc_id = fe.eng_id and fc.hcc_yr = fe.eng_yr
                 """
 
+        return q
+    
+    def query_funnel(self, start_year, customer_list):
+        
+        q = f""" select distinct cfd.person_id
+                            , cfd.drvd_mbrshp_covrg_id
+                            , cfd.utc_period
+                            , cfd.pgrm_nm as category
+                            , case
+                                    when ji.enc_idn is null then 'no_jiva'
+                                    else 'jiva_close' end as sub_category
+                from info_layer.v1_uat_clinical_funnel_dtl cfd
+                        left join edw.lnk_care_pln_alt_id alt
+                                on alt.care_pln_id = cfd.care_pln_id and alt.alt_id_sys = 'https://zeomega.com/jiva-episode-idn'
+                        left join edw.jiva_v_model_interventions ji
+                                on ji.enc_idn = alt.alt_id_val and ji.intervention_status = 'Closed'
+                where cfd.closed_dtm is not null
+                and cfd.enrolled_dtm is not null
+                and (cfd.pgrm_nm like ('%BH%')) is false
+                and (cfd.pgrm_nm like ('%NICU%')) is false
+                and (cfd.pgrm_nm like ('%Pediatric%')) is false
+                and cfd.pgrm_nm not in ('Symptoms Care', 'Pharmacy', 'MSK', 'MHIC', 'Conditions Care')
+                and left(utc_period, 4) >= '{start_year}' 
+                and cfd.org_nm in ('{customer_list}')
+                """
+        
         return q
     
     def query_eng_events(self, start_year, customer_list):
