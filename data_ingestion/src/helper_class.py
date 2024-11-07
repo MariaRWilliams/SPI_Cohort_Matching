@@ -36,6 +36,7 @@ class CG_Helper():
                     "PRISM/COUNTY OF SANTA BARBARA": "COUNTY OF SANTA BARBARA",
                     "RACETRAC PETROLEUM, INC.": "RACETRAC",
                     "RED RIVER TECHNOLOGY LLC": "RED RIVER TECHNOLOGY",
+                    "SA RECYCLING, LLC": "SA RECYCLING",
                     "TEMPLE UNIVERSITY HEALTH SYSTEM": "TEMPLE",
                     "TUTOR PERINI CORPORATION": "TUTOR PERINI",
                     "UGI": "AMERIGAS",
@@ -72,5 +73,13 @@ class CG_Helper():
         
         member_df = member_df.drop(columns = ['edw_cust_x', 'edw_cust_y', 'table_schema', 'acronym', 'cg_cust', 'num_cust', 'dw_customer_nm'])
                 
+        return member_df
+    
+    def map_industry(self, member_df):
+        
+        c_df = pd.read_csv('data_ingestion/src_data/Industry_Map.csv')
+        member_df = pd.merge(member_df, c_df[['edw_cust', 'industry']], on ='edw_cust', how='left')
+        member_df['industry'] = member_df['industry'].fillna('unknown')
+        
         return member_df
         

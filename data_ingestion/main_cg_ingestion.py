@@ -11,8 +11,8 @@ cg_queries = QueryClass()
 cg_helper = CG_Helper()
 file_path = 'data_ingestion/src_data/'
 
-svc_year = '2023'
-export_ver = '04'
+svc_year = '2024'
+export_ver = '05'
 
 from warnings import filterwarnings
 filterwarnings("ignore", category=UserWarning, message='.*pandas only supports SQLAlchemy connectable.*')
@@ -63,27 +63,29 @@ for x in cust_df['table_schema'].unique().tolist():
     schema_claims_df['total_allowed'] = schema_claims_df['med_allowed'] + schema_claims_df['pharma_allowed']
     claims_df = pd.concat([claims_df, schema_claims_df])
 
-member_df = pd.DataFrame()
+member_demo_df = pd.DataFrame()
+member_chron_df = pd.DataFrame()
 for x in cust_df['table_schema'].unique().tolist():
     
     print("Running Demographics Query for "+x)
     sql_statement = cg_queries.query_demographics(x, svc_year)
     temp_df = cg_conn.query_data(sql_statement)
     temp_df['table_schema'] = x
-    schema_mem_df = temp_df
+    member_demo_df = pd.concat([member_demo_df, temp_df])
     
     print("Running Chronic Conditions Query for "+x)
     sql_statement = cg_queries.query_conditions(x, svc_year)
     temp_df = cg_conn.query_data(sql_statement)
     temp_df['table_schema'] = x
-    schema_mem_df = pd.merge(schema_mem_df, temp_df, on = ['dw_member_id', 'table_schema'], how='left')
+    #schema_mem_df = pd.merge(schema_mem_df, temp_df, on = ['dw_member_id', 'table_schema'], how='left')
+    member_chron_df = pd.concat([member_chron_df, temp_df])
     
-    member_df.fillna(0, inplace=True)
-    member_df = pd.concat([member_df, schema_mem_df])
-    
-member_df = cg_helper.map_customers_member(member_df, cust_df)
+member_demo_df = cg_helper.map_customers_member(member_demo_df, cust_df)
+member_demo_df = cg_helper.map_industry(member_demo_df)
+member_demo_df.fillna(0, inplace=True)
 
 claims_df.to_parquet(file_path+'cg_claims_data_'+str(svc_year)+'_'+str(export_ver)+'.parquet', index=False)
-member_df.to_parquet(file_path+'cg_mem_data_'+str(svc_year)+'_'+str(export_ver)+'.parquet', index=False)
+member_demo_df.to_parquet(file_path+'cg_mem_data_'+str(svc_year)+'_'+str(export_ver)+'.parquet', index=False)
+member_chron_df.to_parquet(file_path+'cg_mem_chron_data_'+str(svc_year)+'_'+str(export_ver)+'.parquet', index=False)
 
 cg_conn.dispose()

@@ -31,34 +31,7 @@ class QueryClass():
               """
 
         return q
-        
-    def query_demographics(self, schema, svc_year):
-
-        q = f"""
-            select dw_member_id
-                , ins_emp_group_name                  as dw_customer_nm
-                , udf26_eligibility                   as person_id
-                , to_char(mbr_dob, 'YYYYMM')          as birth_year
-                , mbr_gender                          as sex
-                , mbr_msa                             as msa
-                , mbr_state                           as state
-                , mbr_region_name                     as region
-                , mbr_zip                             as zip_code
-                , ins_plan_type_desc                  as plan_type
-                , ins_carrier_name                    as carrier
-                , min(ins_med_eff_date)               as start_date
-                , case
-                    when max(ins_med_term_date) > current_date
-                        then current_date
-                    else max(ins_med_term_date) end as end_date
-            from {schema}.eligibility
-            where to_char(ins_med_term_date, 'YYYY') >= '{svc_year}'
-            and to_char(ins_med_eff_date, 'YYYY') <= '{svc_year}'
-            group by 1,2,3,4,5,6,7,8,9,10,11
-            """
-              
-        return q
-    
+           
     def query_med_claims(self, schema, svc_year):
 
         q = f"""
@@ -109,10 +82,38 @@ class QueryClass():
               
         return q
     
+    def query_demographics(self, schema, svc_year):
+
+        q = f"""
+            select dw_member_id
+                , ins_emp_group_name                  as dw_customer_nm
+                , udf26_eligibility                   as person_id
+                , to_char(mbr_dob, 'YYYYMM')          as birth_year
+                , mbr_gender                          as sex
+                , mbr_msa                             as msa
+                , mbr_state                           as state
+                , mbr_region_name                     as region
+                , mbr_zip                             as zip_code
+                , ins_plan_type_desc                  as plan_type
+                , ins_carrier_name                    as carrier
+                , min(ins_med_eff_date)               as start_date
+                , case
+                    when max(ins_med_term_date) > current_date
+                        then current_date
+                    else max(ins_med_term_date) end as end_date
+            from {schema}.eligibility
+            where to_char(ins_med_term_date, 'YYYY') >= '{svc_year}'
+            and to_char(ins_med_eff_date, 'YYYY') <= '{svc_year}'
+            group by 1,2,3,4,5,6,7,8,9,10,11
+            """
+              
+        return q
+    
     def query_conditions(self, schema, svc_year):
         
         q = f"""
-                select dw_member_id
+                select to_char(svc_service_frm_date, 'YYYY') as cal_year
+                , dw_member_id
                 , max(case
                         when svc_diag_1_code between 'F32' and 'F33' then 1
                         when svc_diag_2_code between 'F32' and 'F33' then 1
@@ -171,7 +172,7 @@ class QueryClass():
                 end) as COPD
             from {schema}.medical
             where to_char(svc_service_frm_date, 'YYYY') = '{svc_year}'
-            group by 1
+            group by 1,2
             having  depression+hyperlipidemia+osteoarthritis+cancer+CHF+diabetes+CAD+COPD >= 1
             """
             
