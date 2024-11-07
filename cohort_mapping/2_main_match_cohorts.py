@@ -45,6 +45,11 @@ full_df.groupby('category').agg(F.count('person_id').alias('count'),
 
 # COMMAND ----------
 
+#adding a date as int column for close matching
+full_df = full_df.withColumn('date_int', F.round(F.unix_timestamp('utc_period'), 0))
+
+# COMMAND ----------
+
 #available variables
 full_df.columns
 
@@ -54,14 +59,16 @@ full_df.columns
 id_columns = ['person_id', 'category', 'utc_period']
 binary_columns = ['depression', 'hyperlipidemia', 'osteoarthritis', 'chf', 'cancer', 'diabetes', 'cad', 'copd']
 scale_columns = ['age',
-                'total_allowed-1',
-                'total_allowed-2',
-                'total_allowed-3',
-                'total_allowed0',
+                 'date_int',
+                 'inpatient_-3to0sum',
+                 'physician_-3to0sum',
                 'med_allowed_-3to0sum',
                 'pharma_allowed_-3to0sum',
+                'emergency_room_-3to0sum',
+                'office_procedures_-3to0sum',
+                'outpatient_services_-3to0sum',
+                'outpatient_urgent_care_-3to0sum',
                 'total_allowed_-3to0sum',
-                'emergency_room_-3to0sum'
                 ]
 to_binary_columns = ['sex', 'region']
 
@@ -92,16 +99,18 @@ num_final_matches = 2
 #nlist = the number of cells to cluster the control into (4 * sqrt(n) is standard?)
 #nprobe = the number of cells to check for the nearest neighbors
 #max_distance = (look into this one- what distance does FAISS return? euclidian?)
-n_list = 5000
-n_probe = 2500
+n_list = 5
+n_probe = 5
 max_distance = 5
 
 # COMMAND ----------
 
+#spark.maxResultSize = 0
+
 #pull out control - may need to optimize since many rows seem to crash kernel
-control_df = ready_df.filter(ready_df['category']=='control').toPandas()
-control_ids = control_df[id_columns]
-control_vars = control_df[cols]
+#control_df = ready_df.filter(ready_df['category']=='control').toPandas()
+control_ids = ready_df.filter(ready_df['category']=='control').select(*id_columns).toPandas()
+control_vars = ready_df.filter(ready_df['category']=='control').select(*cols).toPandas()
 
 # COMMAND ----------
 
@@ -122,7 +131,7 @@ print(ready_df.select('category').distinct().toPandas()['category'].to_list())
 # COMMAND ----------
 
 #seemed better to process one cohort at a time
-cohort = 'HCC Clinical Engagement'
+cohort = 'HCC Clinical Eng'
 exp_df = ready_df.filter(ready_df['category']==cohort).toPandas()
 exp_ids = exp_df[id_columns]
 exp_vars = exp_df[cols]

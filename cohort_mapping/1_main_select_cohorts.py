@@ -44,7 +44,7 @@ match_preperiod = 3
 match_postperiod = 5
 
 #claims max: what month is the max to expect correct claim data?
-claims_cap = '2024-08-01'
+claims_cap = '2024-09-01'
 
 # COMMAND ----------
 
@@ -70,6 +70,7 @@ mem_df = pc.query_data(spark, dbutils, 'cohort_matching_cg_mem')
 mem_df = mem_df.withColumn('start_date', F.trunc(F.to_date(mem_df.start_date, 'yyyyMM'), 'month'))
 mem_df = mem_df.withColumn('end_date', F.trunc(F.to_date(mem_df.end_date, 'yyyyMM'), 'month'))
 mem_df = mem_df.withColumn('birth_year', F.trunc(F.to_date(mem_df.birth_year, 'yyyyMM'), 'month'))
+mem_df = mem_df.dropDuplicates()
 
 # COMMAND ----------
 
@@ -93,22 +94,12 @@ print(pc.event_list)
 
 #select event categories to use in exposed subset
 #select categories that should disqualify members from the exposed cohort (within clean window)
-exposed_categories = ['Case Management','High Cost Claimants (HCC)', 'HCC Clinical Engagement']
-clean_categories = ['Disease Management', 'Treatment Decision Support', 'Maternity Program']
+exposed_categories = ['High Cost Claimants (HCC)', 'HCC Clinical Eng']
+clean_categories = ['Disease Management', 'Treatment Decision Support', 'Maternity Program', 'Case Management']
 
 # COMMAND ----------
 
-# these lines bring in the code again if updated after original run
-import pyspark.sql.functions as F
-import importlib
-import src.prep_class as prep_class
-
-importlib.reload(prep_class)
-pc = prep_class.Data_Prep()
-
-# COMMAND ----------
-
-#limit exposed cohort to the chosen categories, without any other events in clean window
+#limit exposed cohort to the chosen categories, without other events in clean window
 exposed_subset = pc.clean_exposed(spark, event_df, exposed_categories, clean_categories, clean_preperiod, clean_postperiod)
 
 # COMMAND ----------
@@ -118,7 +109,7 @@ exposed_subset = pc.limit_exposed(exposed_subset, mem_df, eval_preperiod, eval_p
 
 # COMMAND ----------
 
-print('Customers: '+ str(exposed_subset.select('customer_nm').distinct().count()))
+print('Customers: '+ str(exposed_subset.select('edw_cust').distinct().count()))
 print('Event sample size:')
 exposed_subset.select('category', 'person_id').groupby('category').count().show()
 
@@ -129,13 +120,20 @@ exposed_subset.select('category', 'person_id').groupby('category').count().show(
 
 # COMMAND ----------
 
-#remove members with events (all events from original data pull, not just from exposed subset)
-control_subset = mem_df.join(event_df, on='person_id', how='left_anti')
+#available event categories
+print(pc.event_list)
+
+# COMMAND ----------
+
+#select event categories that are ok to have in control, otherwise control will be composed of members without any of the events
+control_ok_categories = ['Engaged']
+
+#remove members with events
+control_subset = mem_df.join(event_df.filter(~F.col('category').isin(control_ok_categories)), on='person_id', how='left_anti')
 
 # COMMAND ----------
 
 #add months: within claims data, within eligibility window for each member, with buffer for evaluation window
-#get preperiod/postperiod and service_month tightened up
 control_subset = pc.generate_control(spark, control_subset, eval_preperiod, eval_postperiod, claims_cap)
 
 # COMMAND ----------
@@ -160,8 +158,11 @@ print(pc.util_list)
 
 # COMMAND ----------
 
-#select claims categories to add as matching variables: all these will be added in leading and trailing periods
-claims_list = ['med_allowed', 'pharma_allowed', 'total_allowed', 'Emergency Room']
+#select claims categories to add as matching/evaluation variables: these will be added for chosen leading and trialing periods
+#leading_list = ['med_allowed', 'pharma_allowed', 'total_allowed', 'Emergency Room']
+leading_list = ['med_allowed', 'pharma_allowed', 'Emergency Room', 'Inpatient Medical', 'Inpatient Surgical', 'Office Procedures', 'Outpatient Services', 'Outpatient Urgent Care', 'Physician-PCP Visit', 'Physician-Preventive', 'Physician-Specialist Visit', 'Physician-Telehealth', 'total_allowed']
+
+trailing_list = ['total_allowed']
 
 # COMMAND ----------
 
@@ -169,8 +170,8 @@ claims_list = ['med_allowed', 'pharma_allowed', 'total_allowed', 'Emergency Room
 #also removes members with negative claims or utilization (data error)
 for subset in [exposed_subset, control_subset]:
     subset_claims = pc.merge_claims(spark, subset, claims_df, match_preperiod, match_postperiod)
-    subset_claims = pc.pivot_claims(subset_claims, claims_list)
-    subset_claims = pc.filter_claims(subset_claims, claims_list)
+    subset_claims = pc.pivot_claims(subset_claims, leading_list, trailing_list)
+    subset_claims = pc.remove_negatives(subset_claims, leading_list, trailing_list)
     subset_joined = subset.join(subset_claims, ['dw_member_id', 'utc_period'], how='inner')
 
     if subset == exposed_subset:
@@ -181,7 +182,7 @@ for subset in [exposed_subset, control_subset]:
 
 # COMMAND ----------
 
-print('Customers: '+ str(combined_cohorts.select('customer_nm').distinct().count()))
+print('Customers: '+ str(combined_cohorts.select('edw_cust').distinct().count()))
 print('Event sample size:')
 combined_cohorts.select('category', 'person_id').groupby('category').count().show()
 
@@ -199,8 +200,15 @@ combined_cohorts = pc.calc_age(combined_cohorts)
 # COMMAND ----------
 
 #add sums for certain periods: runup, postperiod, etc
-combined_cohorts = pc.sum_periods(combined_cohorts, claims_list, -match_preperiod, 0)
-combined_cohorts = pc.sum_periods(combined_cohorts, claims_list, 0, eval_postperiod)
+combined_cohorts = pc.sum_periods(combined_cohorts, leading_list, -match_preperiod, 0)
+combined_cohorts = pc.sum_periods(combined_cohorts, trailing_list, 0, eval_postperiod)
+
+# COMMAND ----------
+
+#combine Utilization
+combined_cohorts = combined_cohorts.withColumn('inpatient_-3to0sum', F.col('inpatient_medical_-3to0sum') + F.col('inpatient_surgical_-3to0sum'))
+combined_cohorts = combined_cohorts.withColumn('physician_-3to0sum', F.col('physician-pcp_visit_-3to0sum') + F.col('physician-specialist_visit_-3to0sum') + F.col('physician-preventive_-3to0sum'))
+
 
 # COMMAND ----------
 
@@ -209,13 +217,12 @@ combined_cohorts = pc.sum_periods(combined_cohorts, claims_list, 0, eval_postper
 
 # COMMAND ----------
 
-cc_sample = combined_cohorts.limit(100)
-
-# COMMAND ----------
-
 #stats for numeric, non-binary columns
+
+#cc_sample = combined_cohorts.limit(100)
 #continuous_variables = dec.num_col_stats(cc_sample, threshold_multiplier=3)
-continuous_variables = dec.num_col_stats(combined_cohorts, threshold_multiplier=3)
+
+continuous_variables = dec.num_col_stats(combined_cohorts, threshold_multiplier=4)
 continuous_variables.display()
 
 # COMMAND ----------
@@ -247,3 +254,13 @@ filtered_cohorts.select('category', 'person_id').groupby('category').count().sho
     .mode("overwrite")
     .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts")
 )
+
+# COMMAND ----------
+
+# these lines bring in the code again if updated after original run
+# import pyspark.sql.functions as F
+# import importlib
+# import src.prep_class as prep_class
+
+# importlib.reload(prep_class)
+# pc = prep_class.Data_Prep()
