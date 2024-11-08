@@ -10,8 +10,6 @@
 # MAGIC Remaining Tasks:
 # MAGIC   - more flexible outlier handling
 # MAGIC   - incorporate Marketscan
-# MAGIC   - more dataset analytics
-# MAGIC   - change utilization column names up front (categories as well?)
 # MAGIC
 # MAGIC
 
@@ -71,6 +69,17 @@ mem_df = mem_df.withColumn('start_date', F.trunc(F.to_date(mem_df.start_date, 'y
 mem_df = mem_df.withColumn('end_date', F.trunc(F.to_date(mem_df.end_date, 'yyyyMM'), 'month'))
 mem_df = mem_df.withColumn('birth_year', F.trunc(F.to_date(mem_df.birth_year, 'yyyyMM'), 'month'))
 mem_df = mem_df.dropDuplicates()
+
+# COMMAND ----------
+
+#pull in member chronic conditions data
+chron_df = pc.query_data(spark, dbutils, 'cohort_matching_cg_chron')
+
+#de-duplicate
+exprs = {x: "max" for x in chron_df.columns if x != 'dw_member_id' and x != 'cal_year' and x != 'table_schema'}
+chron_df = chron_df.groupBy('dw_member_id').agg(exprs)
+chron_df = chron_df.select(*[F.col(c).alias(c.replace('max(','')) for c in chron_df.columns])
+chron_df = chron_df.select(*[F.col(c).alias(c.replace(')','')) for c in chron_df.columns])
 
 # COMMAND ----------
 
@@ -189,12 +198,16 @@ combined_cohorts.select('category', 'person_id').groupby('category').count().sho
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ###Add calculated features
-# MAGIC Age, sum of utilization, etc
+# MAGIC ###Add chronic conditions and calculated features
 
 # COMMAND ----------
 
-#add age
+#add chronic conditions
+combined_cohorts = combined_cohorts.join(chron_df, ['dw_member_id'], how='left').fillna(0)
+
+# COMMAND ----------
+
+#add age (exact age and age band)
 combined_cohorts = pc.calc_age(combined_cohorts)
 
 # COMMAND ----------
@@ -209,6 +222,11 @@ combined_cohorts = pc.sum_periods(combined_cohorts, trailing_list, 0, eval_postp
 combined_cohorts = combined_cohorts.withColumn('inpatient_-3to0sum', F.col('inpatient_medical_-3to0sum') + F.col('inpatient_surgical_-3to0sum'))
 combined_cohorts = combined_cohorts.withColumn('physician_-3to0sum', F.col('physician-pcp_visit_-3to0sum') + F.col('physician-specialist_visit_-3to0sum') + F.col('physician-preventive_-3to0sum'))
 
+
+# COMMAND ----------
+
+#add date as a scalable integer
+combined_cohorts = combined_cohorts.withColumn('date_int', F.round(F.unix_timestamp('utc_period'), 0))
 
 # COMMAND ----------
 

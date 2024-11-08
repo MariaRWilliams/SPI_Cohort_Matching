@@ -1,16 +1,7 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC ##Run Matching Model
-# MAGIC Steps contained in this Notebook:
-# MAGIC - load cohort data and display stats
-# MAGIC - prepare matching variables (scale, encode, etc)
-# MAGIC - run matching algorithm
-# MAGIC - export matched dataset with matching variables to data catalog
-# MAGIC
-# MAGIC Pending Updates:
-# MAGIC - be able to restrict to perfect matches on chosen variables
-# MAGIC - analyse more than one cohort
-# MAGIC - resolve kernel crashing on many columns
+# MAGIC Version that creates an index for exact matching before searching it for most similar
 
 # COMMAND ----------
 
@@ -45,32 +36,33 @@ full_df.groupby('category').agg(F.count('person_id').alias('count'),
 
 # COMMAND ----------
 
-#adding a date as int column for close matching
-full_df = full_df.withColumn('date_int', F.round(F.unix_timestamp('utc_period'), 0))
-
-# COMMAND ----------
-
 #available variables
 full_df.columns
 
 # COMMAND ----------
 
-#select all variables to be used for matching
+#curently, the binary columns are used for the index and the scale columns are used for similarity matching
+#in the future, may need to separate lists of columns to scale/encode and list of columns to index/match
 id_columns = ['person_id', 'category', 'utc_period']
+
+#select variables used for indexing (perfect match)
 binary_columns = ['depression', 'hyperlipidemia', 'osteoarthritis', 'chf', 'cancer', 'diabetes', 'cad', 'copd']
+to_binary_columns = ['sex', 'age_band']
+
+#select variables used for closest match
 scale_columns = ['age',
-                 'date_int',
-                 'inpatient_-3to0sum',
-                 'physician_-3to0sum',
+                'date_int',
                 'med_allowed_-3to0sum',
                 'pharma_allowed_-3to0sum',
+                'total_allowed_-3to0sum',
+                'inpatient_-3to0sum',
+                'physician_-3to0sum',
                 'emergency_room_-3to0sum',
                 'office_procedures_-3to0sum',
                 'outpatient_services_-3to0sum',
-                'outpatient_urgent_care_-3to0sum',
-                'total_allowed_-3to0sum',
+                'outpatient_urgent_care_-3to0sum'
                 ]
-to_binary_columns = ['sex', 'region']
+
 
 final_columns = id_columns + binary_columns + scale_columns + to_binary_columns
 
@@ -82,12 +74,12 @@ ready_df = mc.full_transformation(id_columns, binary_columns, scale_columns, to_
 # COMMAND ----------
 
 cols = list(set(ready_df.columns) - set(id_columns))
-# print(cols)
+#print(cols)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ###Matching Algorithm: Create Control Index
+# MAGIC ###Matching Algorithm: Setup
 
 # COMMAND ----------
 
@@ -105,41 +97,68 @@ max_distance = 5
 
 # COMMAND ----------
 
-#spark.maxResultSize = 0
-
-#pull out control - may need to optimize since many rows seem to crash kernel
-#control_df = ready_df.filter(ready_df['category']=='control').toPandas()
-control_ids = ready_df.filter(ready_df['category']=='control').select(*id_columns).toPandas()
-control_vars = ready_df.filter(ready_df['category']=='control').select(*cols).toPandas()
-
-# COMMAND ----------
-
-#create index of control members
-index = mc.create_index(control_vars, n_list)
-#mc.search_index_test(index, control_vars, num_possible_matches)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ###Matching Algorithm: Cohort Similarity Search
-
-# COMMAND ----------
-
 #possible exposed cohorts
 print(ready_df.select('category').distinct().toPandas()['category'].to_list())
 
 # COMMAND ----------
 
-#seemed better to process one cohort at a time
+#choose cohort (loop later)
 cohort = 'HCC Clinical Eng'
-exp_df = ready_df.filter(ready_df['category']==cohort).toPandas()
-exp_ids = exp_df[id_columns]
-exp_vars = exp_df[cols]
+
+# COMMAND ----------
+
+#loop through demographic combos
+demo_cols = list(set(ready_df.columns) - set(id_columns) - set(scale_columns))
+demo_combos = ready_df.select(*demo_cols).distinct()
+dc_num = len(demo_combos.collect())
+#demo_combos.display()
+
+counter = 1
+#for row in demo_combos.rdd.toLocalIterator():
+row = demo_combos.first()
+print('Processing '+cohort+' '+str(counter)+' of '+str(dc_num))
+
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ###Matching Algorithm: Loop
+# MAGIC 1) An index is created of the control records that match exactly on the relevant variables
+# MAGIC 2) That index is searched and returns a set of closest matches for each exposed record
+# MAGIC 3) Each set is filtered until each exposed record has a set of close matches unique to itself
+# MAGIC 4) Matched records are recorded and loop continues for next set of exact matches
+
+# COMMAND ----------
+
+#get control/ exposed (there has got to be a more pythonic way...)
+this_control = ready_df.filter(ready_df['category']=='control')
+this_exposed = ready_df.filter(ready_df['category']==cohort)
+
+for x in demo_cols:
+    this_control = this_control.filter(this_control[x] == row[x])
+    this_exposed = this_exposed.filter(this_exposed[x] == row[x])
+
+print('exposed count '+str(this_exposed.count()))
+print('countrol count '+str(this_control.count()))
+
+# COMMAND ----------
+
+#make index
+control_ids = this_control.select(*id_columns).toPandas()
+control_vars = this_control.select(*scale_columns).toPandas()
+index = mc.create_index(control_vars, n_list)
+
+# COMMAND ----------
+
+#search index
+exp_ids = this_exposed.select(*id_columns).toPandas()
+exp_vars = this_exposed.select(*scale_columns).toPandas()
+distances, neighbor_indexes = mc.search_index(index, exp_vars, num_possible_matches, n_probe)
+
 
 # COMMAND ----------
 
 #collect matches
-distances, neighbor_indexes = mc.search_index(index, exp_vars, num_possible_matches, n_probe)
 matched_record = mc.pick_matches(distances, neighbor_indexes, exp_vars, max_distance, num_final_matches)
 exposed_matched, control_matched = mc.tag_matches(matched_record, control_ids, exp_ids, num_final_matches)
 
@@ -164,6 +183,15 @@ sample_control_df.display()
 
 # COMMAND ----------
 
+#reload
+# import importlib
+# from src import matching_class
+
+# importlib.reload(matching_class)
+# mc = matching_class.Cohort_Matching()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ###Final Steps: Statistics Overview and Export
 
@@ -182,20 +210,11 @@ final_matched.groupby('category').agg(F.count('person_id').alias('count'),
 # COMMAND ----------
 
 #write data to table
-(
-    final_matched
-    .write
-    .format("delta")
-    .option("overwriteSchema", "true")
-    .mode("overwrite")
-    .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts_matched")
-)
-
-# COMMAND ----------
-
-#reload
-# import importlib
-# from src import matching_class
-
-# importlib.reload(matching_class)
-# mc = matching_class.Cohort_Matching()
+# (
+#     final_matched
+#     .write
+#     .format("delta")
+#     .option("overwriteSchema", "true")
+#     .mode("overwrite")
+#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts_matched")
+# )
