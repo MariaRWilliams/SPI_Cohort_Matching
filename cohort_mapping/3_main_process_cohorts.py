@@ -50,4 +50,4 @@ agg_df.display()
 chart_df = agg_df.toPandas()
 chart_df = chart_df[['category', 'total_allowed-3', 'total_allowed-2', 'total_allowed-1', 'total_allowed0', 'total_allowed1', 'total_allowed2', 'total_allowed3', 'total_allowed4', 'total_allowed5']].set_index('category').T
 #print(chart_df)
-chart_df.plot.line(figsize = (15,5), title = 'Average spend')
+chart_df.plot.line(figsize = (15,5), title = 'PMPM spend')

@@ -7,9 +7,8 @@ from faiss import IndexFlatL2, IndexIVFFlat
 class Cohort_Matching():
 
     def __init__(self):
-        """
-        no variables to initialize yet 
-        """
+        index_cols = []
+        s_matching_cols = []
 
     def create_vector(self, df, scale_columns):
 
@@ -79,7 +78,7 @@ class Cohort_Matching():
         ready_df = ready_df.select(*[x.lower() for x in ready_df.columns])
 
         #return
-        return ready_df
+        return ready_df.distinct()
     
     def create_index(self, control, nlist):
 
