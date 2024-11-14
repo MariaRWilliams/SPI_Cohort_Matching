@@ -264,14 +264,14 @@ filtered_cohorts.select('category', 'person_id').groupby('category').count().sho
 # COMMAND ----------
 
 #write data to table
-(
-    filtered_cohorts
-    .write
-    .format("delta")
-    .option("overwriteSchema", "true")
-    .mode("overwrite")
-    .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts")
-)
+# (
+#     filtered_cohorts
+#     .write
+#     .format("delta")
+#     .option("overwriteSchema", "true")
+#     .mode("overwrite")
+#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts")
+# )
 
 # COMMAND ----------
 
