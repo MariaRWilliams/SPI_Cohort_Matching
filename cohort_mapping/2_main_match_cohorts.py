@@ -72,15 +72,13 @@ mc.scale_columns = ['total_allowed0',
                     'depression'
                 ]
 
-#dictionary of weights
+#dictionary of weights (weighted after scaling)
 mc.weights = {'total_allowed0': 5,
               'total_allowed-1': 3,
               'total_allowed-2': 2,
-              'total_allowed-3': 1, }
-
+              'total_allowed-3': 1}
 
 mc.final_columns = mc.id_columns + mc.binary_columns + mc.scale_columns + mc.to_binary_columns
-
 
 # COMMAND ----------
 

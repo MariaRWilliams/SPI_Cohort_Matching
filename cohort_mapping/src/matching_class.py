@@ -91,6 +91,10 @@ class Cohort_Matching():
         ready_df = ready_df.select([F.col(x).alias(x.replace('[^a-zA-Z0-9]', '')) for x in ready_df.columns])
         ready_df = ready_df.select(*[x.lower() for x in ready_df.columns])
 
+        #weights variables
+        for col in self.weights:
+            ready_df = ready_df.withColumn(col, self.weights[col] * ready_df[col])
+
         #return
         return ready_df.distinct()
     
