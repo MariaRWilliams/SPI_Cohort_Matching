@@ -14,8 +14,8 @@ class QueryClass():
               , case when sd.savings_category in 
                      ('High Cost Claimants (HCC)', 'Case Management', 'Disease Management',
                      'Maternity Program', 'Treatment Decision Support') then sd.savings_category
-                     else 'other_SPI_event' end as category
-             , 'spi_definition' as sub_category
+                     else 'other_SPI_event' end                 as category
+             , 'spi_definition'                                 as sub_category
               FROM acp_edw.info_layer.v1_uat_spi_dtl sd
               inner join acp_edw.info_layer.prs_mbrshp_covrg pmc on 
                      upper(sd.drvd_mbrshp_covrg_id) = upper(pmc.drvd_mbrshp_covrg_id) and 
@@ -46,6 +46,7 @@ class QueryClass():
                                                     , left(mc.utc_period, 4)  as eng_yr
                                                     , min(mc.utc_period)      as eng_mo
                                         from acp_edw.info_layer.mstr_comm mc
+                                        inner join info_layer.mstr_comm mc2 ON mc2.drvd_comm_id = mc.drvd_comm_id
                                                 inner join acp_edw.info_layer.task_dtl td ON td.enctr_id = mc.enctr_id AND
                                                                                     td.task_cd = 'issue' AND
                                                                                     td.task_sts NOT IN
@@ -61,9 +62,9 @@ class QueryClass():
                 select fc.person_id
                     , fc.hcc_id as drvd_mbrshp_covrg_id
                     , fe.eng_mo as utc_period
-                    , 'HCC Clinical Eng' as category
+                    , 'HCC Clinical Eng'                            as category
                     , case when hcc_mo > fe.eng_mo then 'pre-hcc'
-                            else 'post-hcc' end as sub_category
+                            else 'post-hcc' end                     as sub_category
                 from #first_hcc fc
                         inner join #first_clin_eng fe on fc.hcc_id = fe.eng_id and fc.hcc_yr = fe.eng_yr
                 """
@@ -75,10 +76,10 @@ class QueryClass():
         q = f""" select distinct cfd.person_id
                             , cfd.drvd_mbrshp_covrg_id
                             , cfd.utc_period
-                            , cfd.pgrm_nm as category
+                            , cfd.pgrm_nm                                   as category
                             , case
                                     when ji.enc_idn is null then 'no_jiva'
-                                    else 'jiva_close' end as sub_category
+                                    else 'jiva_close' end                   as sub_category
                 from acp_edw.info_layer.v1_uat_clinical_funnel_dtl cfd
                         left join acp_edw.edw.lnk_care_pln_alt_id alt
                                 on alt.care_pln_id = cfd.care_pln_id and alt.alt_id_sys = 'https://zeomega.com/jiva-episode-idn'
@@ -109,11 +110,30 @@ class QueryClass():
                                     and mc.utc_period >= '{start_year}' 
                                     and mc.drvd_org_nm in ('{customer_list}')
                                     group by 1, 2, 3)
-                select person_id
-                    , drvd_mbrshp_covrg_id
-                    , eng_mo    as utc_period
-                    , 'Engaged' as category
-                from #first_eng
+                        , #first_clin_eng as (select distinct mc.drvd_mbrshp_covrg_id as eng_id
+                                                    , left(mc.utc_period, 4)  as clin_eng_yr
+                                                    , min(mc.utc_period)      as clin_eng_mo
+                                        from acp_edw.info_layer.mstr_comm mc
+                                        inner join acp_edw.info_layer.mstr_comm mc2 ON mc2.drvd_comm_id = mc.drvd_comm_id
+                                                inner join acp_edw.info_layer.task_dtl td ON td.enctr_id = mc.enctr_id AND
+                                                                                    td.task_cd = 'issue' AND
+                                                                                    td.task_sts NOT IN
+                                                                                    ('duplicate', 'rejected', 'cancelled',
+                                                                                        'entered-in-error', 'draft') AND
+                                                                                    td.deleted_flg <> 1 AND
+                                                                                    td.objtv_category = 'Care' AND
+                                                                                    (td.objtv_type_nm = 'Other Care Education') is false
+                                        WHERE mc.clinical_engmnt_flg = 1
+                                        and left(mc.utc_period, 4) >= '{start_year}' 
+                                        and mc.drvd_org_nm in ('{customer_list}')
+                                        group by 1, 2)
+                select eng.person_id
+                    , eng.drvd_mbrshp_covrg_id
+                    , case when c_eng.eng_id is null then eng.eng_mo else clin_eng_mo end           as utc_period
+                    , case when c_eng.eng_id is null then 'Engaged' else 'Clinically Engaged' end   as category
+                    , 'Engaged'                                                                     as sub_category
+                from #first_eng eng
+                    left join #first_clin_eng c_eng on eng.person_id = c_eng.eng_id and eng.eng_yr = c_eng.clin_eng_yr
                 """
 
         return q
