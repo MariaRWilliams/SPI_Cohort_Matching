@@ -24,12 +24,21 @@ details_df.columns
 
 # COMMAND ----------
 
+print(details_df.select('category').distinct().toPandas()['category'].to_list())
+
+# COMMAND ----------
+
 #choose id columns, and variables for analysis
 join_id_col = ['person_id', 'category', 'utc_period']
 display_id_col = ['category']
 compare_col_prefix = ['total_allowed']
 
-col = display_id_col + [column for column in details_df.columns if column.startswith(*compare_col_prefix)]
+#only works with one prefix- fix that
+col = display_id_col + [column for column in details_df.columns if column.startswith(*compare_col_prefix) and not column.endswith('sum')]
+
+# COMMAND ----------
+
+print(col)
 
 # COMMAND ----------
 
@@ -48,6 +57,6 @@ agg_df.display()
 # COMMAND ----------
 
 chart_df = agg_df.toPandas()
-chart_df = chart_df[['category', 'total_allowed-3', 'total_allowed-2', 'total_allowed-1', 'total_allowed0', 'total_allowed1', 'total_allowed2', 'total_allowed3', 'total_allowed4', 'total_allowed5']].set_index('category').T
+chart_df = chart_df[col].set_index('category').T
 #print(chart_df)
 chart_df.plot.line(figsize = (15,5), title = 'PMPM spend')
