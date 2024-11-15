@@ -24,30 +24,39 @@ details_df.columns
 
 # COMMAND ----------
 
-print(details_df.select('category').distinct().toPandas()['category'].to_list())
-
-# COMMAND ----------
-
 #choose id columns, and variables for analysis
 join_id_col = ['person_id', 'category', 'utc_period']
 display_id_col = ['category']
 compare_col_prefix = ['total_allowed']
 
 #only works with one prefix- fix that
-col = display_id_col + [column for column in details_df.columns if column.startswith(*compare_col_prefix) and not column.endswith('sum')]
+col = display_id_col + [column for column in details_df.columns if column.startswith(tuple(compare_col_prefix)) and not column.endswith('sum')]
 
 # COMMAND ----------
 
-print(col)
+# MAGIC %md
+# MAGIC ###Statistics
 
 # COMMAND ----------
 
-#join comparison details to matched cohort and aggregate
-full_df = matched_df.alias('df1').join(details_df.alias('df2'), join_id_col, 'left').select('df2.*')
-full_df = full_df.select(*col)
+#join comparison details to matched cohort
+matched_df = matched_df.withColumn('category_long', matched_df['category'])
+matched_df = matched_df.withColumn('category', F.when(F.col('category').contains('control'), 'control').otherwise(F.col('category')))
 
-agg_df = full_df.groupby(*display_id_col).agg(*[F.round(F.avg(F.col(x)),2).alias(x) for x in col if x not in join_id_col])
-agg_df.display()
+full_df = matched_df.alias('df1').join(details_df.alias('df2'), join_id_col, 'left').select('df2.*', 'category_long')
+full_df = full_df.withColumn('category', full_df['category_long'])
+
+# COMMAND ----------
+
+#stats
+full_df.groupby('category').agg(F.count('person_id').alias('count'), 
+                                F.round(F.sum('cancer')).alias('members with cancer'), 
+                                F.round(F.sum('diabetes')).alias('members with diabetes'), 
+                                F.round(F.mean('total_allowed-1'), 2).alias('avg spend at period -1'), 
+                                F.round(F.mean('age'), 2).alias('avg age'),
+                                F.min('utc_period').alias('min interaction period'),
+                                F.max('utc_period').alias('max interaction period')
+                                ).display()
 
 # COMMAND ----------
 
@@ -56,7 +65,11 @@ agg_df.display()
 
 # COMMAND ----------
 
+agg_df = full_df.select(*col)
+agg_df = agg_df.groupby(*display_id_col).agg(*[F.round(F.avg(F.col(x)),2).alias(x) for x in col if x not in join_id_col])
+agg_df.display()
+
 chart_df = agg_df.toPandas()
 chart_df = chart_df[col].set_index('category').T
 #print(chart_df)
-chart_df.plot.line(figsize = (15,5), title = 'PMPM spend')
+chart_df.plot.line(figsize = (15,5), title = compare_col_prefix[0]).vlines(x=3, ymin=0, ymax=chart_df.to_numpy().max(), ls='--')
