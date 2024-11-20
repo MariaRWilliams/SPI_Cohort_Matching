@@ -14,7 +14,6 @@ class Cohort_Matching():
         binary_columns = []
         to_binary_columns = []
         final_columns = []
-        fixed_cols = []
         weights = {}
 
         #model specifications
@@ -91,7 +90,7 @@ class Cohort_Matching():
         ready_df = ready_df.select([F.col(x).alias(x.replace('[^a-zA-Z0-9]', '')) for x in ready_df.columns])
         ready_df = ready_df.select(*[x.lower() for x in ready_df.columns])
 
-        #weights variables
+        #weight variables
         for col in self.weights:
             ready_df = ready_df.withColumn(col, self.weights[col] * ready_df[col])
 
@@ -180,7 +179,10 @@ class Cohort_Matching():
             mtch_col_nm = 'control_index_'+str(c)
 
             final_matched = matches[~matches[mtch_col_nm].isnull()].reset_index(drop=True)
+
             exposed_matched = exposed.loc[final_matched.subset_index].reset_index().rename(columns={'index':'match_index'})
+            c_matched = control.loc[final_matched[mtch_col_nm]].reset_index()
+            c_matched = pd.concat([c_matched, final_matched['subset_index']], axis=1).rename(columns={'subset_index':'match', 'index':'match_index'})
 
             c_matched = control.loc[final_matched[mtch_col_nm]].reset_index()
             c_matched = pd.concat([c_matched, final_matched['subset_index']], axis=1).rename(columns={'subset_index':'match', 'index':'match_index'})
@@ -227,7 +229,8 @@ class Cohort_Matching():
         exposed_df = final_matched.filter(~F.col('category').contains('control'))
         control_df = final_matched.filter(F.col('category').contains('control'))
 
-        sample_exposed = exposed_df.withColumn('key',F.rand()).orderBy('key').limit(num_sample).orderBy('match_key').drop('key')
+        sample_exposed = exposed_df.withColumn('key',F.rand()).orderBy('key').limit(num_sample).cache()
+        sample_exposed = sample_exposed.drop('key')
 
         sample_list = sample_exposed.toPandas()
         sample_list = sample_list['match_key'].to_list()
@@ -238,82 +241,87 @@ class Cohort_Matching():
 
     def main_match(self, spark, cohort, full_df, ready_df):
 
-        #prep to loop through demographic combos: should be optimized to be checked to be relevant first
-        demo_combos = ready_df.filter(ready_df['category']==cohort).select(*self.fixed_cols).distinct()
+        print('Collecting processing details...')
+        #prep to loop through demographic combos
+        fixed_cols = list(set(ready_df.columns) - set(self.id_columns) - set(self.scale_columns))
+
+        exposed = ready_df.filter(ready_df['category']==cohort)
+        control = ready_df.filter(ready_df['category']=='control')
+
+        ex_agg = exposed.groupby(*fixed_cols).agg(F.count('person_id').alias('exposed_count'))
+        c_agg = control.groupby(*fixed_cols).agg(F.count('person_id').alias('control_count'))
+        
+        demo_combos = ex_agg.join(c_agg, on=fixed_cols, how='left')
+        disc_demos = demo_combos.filter(F.col('control_count') <= self.n_list*40)
+        demo_combos = demo_combos.filter(F.col('control_count') > self.n_list*40)
+
         dc_num = len(demo_combos.collect())
         counter = 1
 
         for row in demo_combos.rdd.toLocalIterator():
-        #row = demo_combos.first()
-            #print(row)
+        #for row in demo_combos.limit(2).rdd.toLocalIterator():
             print('Processing '+cohort+' '+str(counter)+' of '+str(dc_num))
-            
-            #get control/ exposed (there has got to be a more pythonic way...)
-            this_control = ready_df.filter(ready_df['category']=='control')
-            this_exposed = ready_df.filter(ready_df['category']==cohort)
 
-            for x in self.fixed_cols:
+            this_control = control
+            this_exposed = exposed
+
+            for x in fixed_cols:
                 this_control = this_control.filter(this_control[x] == row[x])
                 this_exposed = this_exposed.filter(this_exposed[x] == row[x])
-
+ 
+            # does this add more time than useful? 
+            # control = control.join(this_control, on=self.id_columns, how='anti')
+            # exposed = exposed.join(this_exposed, on=self.id_columns, how='anti')
             print('datasets prepared')
 
-            #check if enough to even process
-            if self.n_list > this_control.count():
-            #if self.n_list*40 > this_control.count():
-                print('not enough control members to create index')
-                print('necessary: '+str(self.n_list))
-                print('preferred: '+str(self.n_list*40))
-                print('available: '+str(this_control.count()))
+            #make index
+            this_control = this_control.select(*self.id_columns, *self.scale_columns).toPandas()
+            control_ids = this_control[self.id_columns]
+            control_vars = this_control[self.scale_columns]
+            index = self.create_index(control_vars)
 
+            print('index created')
+
+            #search index
+            this_exposed = this_exposed.select(*self.id_columns, *self.scale_columns).toPandas()
+            exp_ids = this_exposed[self.id_columns]
+            exp_vars = this_exposed[self.scale_columns]
+            distances, neighbor_indexes = self.search_index(index, exp_vars)
+
+            print('search complete')
+
+            #collect matches
+            matched_record = self.pick_matches(distances, neighbor_indexes, exp_vars)
+            exposed_matched, control_matched = self.tag_matches(matched_record, control_ids, exp_ids)
+            
+
+            if matched_record.empty:
+                print('no suitable matches found')
                 counter = counter+1
             else:
 
-                #make index
-                control_ids = this_control.select(*self.id_columns).toPandas()
-                control_vars = this_control.select(*self.scale_columns).toPandas()
-                index = self.create_index(control_vars)
+                #switch back to spark
+                matched_record = spark.createDataFrame(matched_record)
+                exposed_matched = spark.createDataFrame(exposed_matched)
+                control_matched = spark.createDataFrame(control_matched)
 
-                print('index created')
+                #detail matches
+                matched_details = self.detail_matches(spark, matched_record, exposed_matched, control_matched, full_df, counter)
 
-                #search index
-                exp_ids = this_exposed.select(*self.id_columns).toPandas()
-                exp_vars = this_exposed.select(*self.scale_columns).toPandas()
-                distances, neighbor_indexes = self.search_index(index, exp_vars)
+                print('cohorts defined')
 
-                print('search complete')
-
-                #collect matches
-                matched_record = self.pick_matches(distances, neighbor_indexes, exp_vars)
-                exposed_matched, control_matched = self.tag_matches(matched_record, control_ids, exp_ids)
-
-                if matched_record.empty:
-                    print('no suitable matches found')
-                    counter = counter+1
+                #end matching for this combo
+                try:
+                    final_matched
+                except NameError:
+                    final_matched = matched_details
                 else:
-
-                    #switch back to spark
-                    matched_record = spark.createDataFrame(matched_record)
-                    exposed_matched = spark.createDataFrame(exposed_matched)
-                    control_matched = spark.createDataFrame(control_matched)
-
-                    #detail matches
-                    matched_details = self.detail_matches(spark, matched_record, exposed_matched, control_matched, full_df, counter)
-
-                    print('cohorts defined')
-
-                    #end matching for this combo
-                    try:
-                        final_matched
-                    except NameError:
-                        final_matched = matched_details
-                    else:
-                        final_matched = final_matched.union(matched_details)
-                    
-                    counter = counter+1
+                    final_matched = final_matched.union(matched_details)
+                
+                counter = counter+1
 
         print('Matching Complete')
-        return final_matched
+        return final_matched.distinct(), disc_demos
 
 
 
