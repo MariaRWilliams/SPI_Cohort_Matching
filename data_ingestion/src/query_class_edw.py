@@ -46,7 +46,7 @@ class QueryClass():
                                                     , left(mc.utc_period, 4)  as eng_yr
                                                     , min(mc.utc_period)      as eng_mo
                                         from acp_edw.info_layer.mstr_comm mc
-                                        inner join info_layer.mstr_comm mc2 ON mc2.drvd_comm_id = mc.drvd_comm_id
+                                        inner join acp_edw.info_layer.mstr_comm mc2 ON mc2.drvd_comm_id = mc.drvd_comm_id
                                                 inner join acp_edw.info_layer.task_dtl td ON td.enctr_id = mc.enctr_id AND
                                                                                     td.task_cd = 'issue' AND
                                                                                     td.task_sts NOT IN

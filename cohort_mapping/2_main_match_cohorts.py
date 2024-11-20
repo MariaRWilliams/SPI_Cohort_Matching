@@ -52,8 +52,15 @@ full_df.columns
 mc.id_columns = ['person_id', 'category', 'utc_period']
 
 #select variables used for indexing (perfect match)
-mc.binary_columns = []
-mc.to_binary_columns = ['edw_cust']
+mc.binary_columns = ['diabetes',
+                    'cancer',
+                    'chf',
+                    'hyperlipidemia',
+                    'cad',
+                    'copd'
+                    ]
+
+mc.to_binary_columns = ['age_band', 'sex']
 
 #select variables used for closest match
 mc.scale_columns = ['total_allowed0',
@@ -65,9 +72,6 @@ mc.scale_columns = ['total_allowed0',
                     'emergency_room_-3to0sum',
                     'physician_-3to0sum',
                     'date_int',
-                    'cancer',
-                    'hyperlipidemia',
-                    'diabetes',
                     'osteoarthritis',
                     'depression'
                 ]
@@ -99,9 +103,9 @@ mc.num_final_matches = 1
 #nlist = the number of cells to cluster the control into (4 * sqrt(n) is standard?)
 #nprobe = the number of cells to check for the nearest neighbors
 #max_distance = (look into this one- what distance does FAISS return? euclidian?)
-mc.n_list = 50
-mc.n_probe = 10
-mc.max_distance = 50
+mc.n_list = 1
+mc.n_probe = 1
+mc.max_distance = 10
 
 # COMMAND ----------
 
@@ -119,25 +123,13 @@ print(ready_df.select('category').distinct().toPandas()['category'].to_list())
 
 # COMMAND ----------
 
-#reload
-# import importlib
-# from src import matching_class
-
-# importlib.reload(matching_class)
-# mc = matching_class.Cohort_Matching()
-
-# COMMAND ----------
-
 #for cohort in ready_df.select('category').distinct().toPandas()['category'].to_list():
-cohort = 'High Cost Claimants (HCC)'
+cohort = 'Case Management - Oncology'
 
 # COMMAND ----------
-
-#get columns
-mc.fixed_cols = list(set(ready_df.columns) - set(mc.id_columns) - set(mc.scale_columns))
 
 #loop through fixed sets
-final_matched = mc.main_match(spark, cohort, full_df, ready_df)
+final_matched, disc_demos = mc.main_match(spark, cohort, full_df, ready_df)
 
 # COMMAND ----------
 
@@ -148,15 +140,15 @@ final_matched = mc.main_match(spark, cohort, full_df, ready_df)
 
 #check sample
 sample_exposed_df, sample_control_df = mc.sample_matches(final_matched, 3)
-sample_exposed_df.display()
-sample_control_df.display()
+sample_exposed_df.orderBy('match_key').display()
+sample_control_df.orderBy('match_key').display()
 
 # COMMAND ----------
 
 final_matched.groupby('category').agg(F.count('person_id').alias('count'), 
                                 F.round(F.sum('cancer')).alias('members with cancer'), 
                                 F.round(F.sum('diabetes')).alias('members with diabetes'), 
-                                F.round(F.mean('total_allowed-1'), 2).alias('avg spend at period -1'), 
+                                F.round(F.mean('total_allowed0'), 2).alias('avg spend at period 0'), 
                                 F.round(F.mean('age'), 2).alias('avg age')
                                 ).display()
 
@@ -175,11 +167,6 @@ final_matched.groupby('category').agg(F.count('person_id').alias('count'),
 
 # COMMAND ----------
 
-# check_df = pc.query_data(spark, dbutils, 'cohort_matching_cohorts_matched')
-# check_df.count()
-
-# COMMAND ----------
-
 #write data to table
 # (
 #     final_matched
@@ -189,3 +176,12 @@ final_matched.groupby('category').agg(F.count('person_id').alias('count'),
 #     .mode("overwrite")
 #     .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts_matched")
 # )
+
+# COMMAND ----------
+
+#reload
+# import importlib
+# from src import matching_class
+
+# importlib.reload(matching_class)
+# mc = matching_class.Cohort_Matching()

@@ -76,18 +76,6 @@ s_df.show(5)
 
 # COMMAND ----------
 
-#overwrite table with data
-# (
-#     s_df
-#     .write
-#     .format("delta")
-#     .option("overwriteSchema", "true")
-#     .mode("overwrite")
-#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_edw_events")
-# )
-
-# COMMAND ----------
-
 #append data to table (will add columns if not already present)
 # (
 #     s_df
@@ -95,6 +83,18 @@ s_df.show(5)
 #     .format("delta")
 #     .option("mergeSchema", "true")
 #     .mode("append")
+#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_edw_events")
+# )
+
+# COMMAND ----------
+
+#overwrite table with data
+# (
+#     s_df
+#     .write
+#     .format("delta")
+#     .option("overwriteSchema", "true")
+#     .mode("overwrite")
 #     .saveAsTable("dev.`clinical-analysis`.cohort_matching_edw_events")
 # )
 
