@@ -76,8 +76,7 @@ for x in cust_df['table_schema'].unique().tolist():
     print("Running Chronic Conditions Query for "+x)
     sql_statement = cg_queries.query_conditions(x, svc_year)
     temp_df = cg_conn.query_data(sql_statement)
-    temp_df['table_schema'] = x
-    #schema_mem_df = pd.merge(schema_mem_df, temp_df, on = ['dw_member_id', 'table_schema'], how='left')
+    #temp_df['table_schema'] = x
     member_chron_df = pd.concat([member_chron_df, temp_df])
     
 member_demo_df = cg_helper.map_customers_member(member_demo_df, cust_df)
