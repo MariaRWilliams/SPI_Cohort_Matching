@@ -41,13 +41,13 @@ start_year = '2023'
 #note: if get deletionVectors error, update cluster to one with Databricks Runtime 12.2 LTS - 15.3
 cust = (
     spark
-    .sql("SELECT distinct customer_nm FROM dev.`clinical-analysis`.cohort_matching_cg_mem")
+    .sql("SELECT distinct edw_cust FROM dev.`clinical-analysis`.cohort_matching_cg_mem")
 )
 
 #convert to edw customers
 hc = helper_class.CG_Helper()
 cust = cust.toPandas()
-cust = hc.map_customers(cust, 'customer_nm')
+#cust = hc.map_customers(cust, 'customer_nm')
 cust_list = cust[~cust['edw_cust'].isin(['BK', 'NON-ACCOLADE', 'ACCOLADE', 'BLANK'])]['edw_cust'].unique()
 cust_list = [re.sub("\'", "\'\'", s) for s in cust_list]
 cust_list_string = "','".join(cust_list)
@@ -76,18 +76,6 @@ s_df.show(5)
 
 # COMMAND ----------
 
-#overwrite table with data
-# (
-#     s_df
-#     .write
-#     .format("delta")
-#     .option("overwriteSchema", "true")
-#     .mode("overwrite")
-#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_edw_events")
-# )
-
-# COMMAND ----------
-
 #append data to table (will add columns if not already present)
 # (
 #     s_df
@@ -95,6 +83,18 @@ s_df.show(5)
 #     .format("delta")
 #     .option("mergeSchema", "true")
 #     .mode("append")
+#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_edw_events")
+# )
+
+# COMMAND ----------
+
+#overwrite table with data
+# (
+#     s_df
+#     .write
+#     .format("delta")
+#     .option("overwriteSchema", "true")
+#     .mode("overwrite")
 #     .saveAsTable("dev.`clinical-analysis`.cohort_matching_edw_events")
 # )
 

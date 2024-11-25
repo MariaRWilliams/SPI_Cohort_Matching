@@ -6,11 +6,6 @@
 # MAGIC - prepare matching variables (scale, encode, etc)
 # MAGIC - run matching algorithm
 # MAGIC - export matched dataset with matching variables to data catalog
-# MAGIC
-# MAGIC Pending Updates:
-# MAGIC - be able to restrict to perfect matches on chosen variables
-# MAGIC - analyse more than one cohort
-# MAGIC - resolve kernel crashing on many columns
 
 # COMMAND ----------
 
@@ -33,9 +28,11 @@ full_df = pc.query_data(spark, dbutils, 'cohort_matching_cohorts')
 # COMMAND ----------
 
 #stats: what else would be useful? do both before and after
-full_df.groupby('category').agg(F.count('person_id').alias('count'), 
+full_df.groupby('category').agg(F.count('person_id').alias('member_count'), 
                                 F.round(F.mean('total_allowed0'), 2).alias('avg spend at period 0'), 
-                                F.round(F.mean('age'), 2).alias('avg age')
+                                F.round(F.mean('age'), 2).alias('avg age'),
+                                F.min('utc_period').alias('min_period'),
+                                F.max('utc_period').alias('max_period'),
                                 ).show()
 
 # COMMAND ----------
@@ -45,83 +42,70 @@ full_df.groupby('category').agg(F.count('person_id').alias('count'),
 
 # COMMAND ----------
 
-#adding a date as int column for close matching
-full_df = full_df.withColumn('date_int', F.round(F.unix_timestamp('utc_period'), 0))
-
-# COMMAND ----------
-
 #available variables
 full_df.columns
 
 # COMMAND ----------
 
-#select all variables to be used for matching
-id_columns = ['person_id', 'category', 'utc_period']
-binary_columns = ['depression', 'hyperlipidemia', 'osteoarthritis', 'chf', 'cancer', 'diabetes', 'cad', 'copd']
-scale_columns = ['age',
-                 'date_int',
-                 'inpatient_-3to0sum',
-                 'physician_-3to0sum',
-                'med_allowed_-3to0sum',
-                'pharma_allowed_-3to0sum',
-                'emergency_room_-3to0sum',
-                'office_procedures_-3to0sum',
-                'outpatient_services_-3to0sum',
-                'outpatient_urgent_care_-3to0sum',
-                'total_allowed_-3to0sum',
+#curently, the binary columns are used for the index and the scale columns are used for similarity matching
+#in the future, may need to separate lists of columns to scale/encode and list of columns to index/match
+mc.id_columns = ['person_id', 'category', 'utc_period']
+
+#select variables used for indexing (perfect match)
+mc.binary_columns = ['diabetes',
+                    'cancer',
+                    'chf',
+                    'hyperlipidemia',
+                    'cad',
+                    'copd'
+                    ]
+
+mc.to_binary_columns = ['age_band', 'sex']
+
+#select variables used for closest match
+mc.scale_columns = ['total_allowed0',
+                    'total_allowed-1',
+                    'total_allowed-2',
+                    'total_allowed-3',
+                    'age',
+                    'inpatient_-3to0sum',
+                    'emergency_room_-3to0sum',
+                    'physician_-3to0sum',
+                    'date_int',
+                    'osteoarthritis',
+                    'depression'
                 ]
-to_binary_columns = ['sex', 'region']
 
-final_columns = id_columns + binary_columns + scale_columns + to_binary_columns
+#dictionary of weights (weighted after scaling)
+mc.weights = {'total_allowed0': 5,
+              'total_allowed-1': 3,
+              'total_allowed-2': 2,
+              'total_allowed-3': 1}
 
+mc.final_columns = mc.id_columns + mc.binary_columns + mc.scale_columns + mc.to_binary_columns
 
 # COMMAND ----------
 
-ready_df = mc.full_transformation(id_columns, binary_columns, scale_columns, to_binary_columns, full_df)
-
-# COMMAND ----------
-
-cols = list(set(ready_df.columns) - set(id_columns))
-# print(cols)
+ready_df = mc.full_transformation(full_df)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ###Matching Algorithm: Create Control Index
+# MAGIC ###Matching Algorithm: Setup
 
 # COMMAND ----------
 
 #analysis variables
-num_possible_matches = 10
-num_final_matches = 2
+mc.num_possible_matches = 10
+mc.num_final_matches = 1
 
 #model variables
 #nlist = the number of cells to cluster the control into (4 * sqrt(n) is standard?)
 #nprobe = the number of cells to check for the nearest neighbors
 #max_distance = (look into this one- what distance does FAISS return? euclidian?)
-n_list = 5
-n_probe = 5
-max_distance = 5
-
-# COMMAND ----------
-
-#spark.maxResultSize = 0
-
-#pull out control - may need to optimize since many rows seem to crash kernel
-#control_df = ready_df.filter(ready_df['category']=='control').toPandas()
-control_ids = ready_df.filter(ready_df['category']=='control').select(*id_columns).toPandas()
-control_vars = ready_df.filter(ready_df['category']=='control').select(*cols).toPandas()
-
-# COMMAND ----------
-
-#create index of control members
-index = mc.create_index(control_vars, n_list)
-#mc.search_index_test(index, control_vars, num_possible_matches)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ###Matching Algorithm: Cohort Similarity Search
+mc.n_list = 1
+mc.n_probe = 1
+mc.max_distance = 10
 
 # COMMAND ----------
 
@@ -130,37 +114,22 @@ print(ready_df.select('category').distinct().toPandas()['category'].to_list())
 
 # COMMAND ----------
 
-#seemed better to process one cohort at a time
-cohort = 'HCC Clinical Eng'
-exp_df = ready_df.filter(ready_df['category']==cohort).toPandas()
-exp_ids = exp_df[id_columns]
-exp_vars = exp_df[cols]
+# MAGIC %md
+# MAGIC ###Matching Algorithm: Loop
+# MAGIC 1) An index is created of the control records that match exactly on the relevant variables
+# MAGIC 2) That index is searched and returns a set of closest matches for each exposed record
+# MAGIC 3) Each set is filtered until each exposed record has a set of close matches unique to itself
+# MAGIC 4) Matched records are recorded and loop continues for next set of exact matches
 
 # COMMAND ----------
 
-#collect matches
-distances, neighbor_indexes = mc.search_index(index, exp_vars, num_possible_matches, n_probe)
-matched_record = mc.pick_matches(distances, neighbor_indexes, exp_vars, max_distance, num_final_matches)
-exposed_matched, control_matched = mc.tag_matches(matched_record, control_ids, exp_ids, num_final_matches)
+#for cohort in ready_df.select('category').distinct().toPandas()['category'].to_list():
+cohort = 'Case Management - Oncology'
 
 # COMMAND ----------
 
-#switch back to spark
-matched_record = spark.createDataFrame(matched_record)
-exposed_matched = spark.createDataFrame(exposed_matched)
-control_matched = spark.createDataFrame(control_matched)
-
-# COMMAND ----------
-
-#detail matches
-final_matched = mc.detail_matches(spark, matched_record, exposed_matched, control_matched, full_df, final_columns, id_columns, num_final_matches)
-
-# COMMAND ----------
-
-#check sample
-sample_exposed_df, sample_control_df = mc.sample_matches(final_matched, 3)
-sample_exposed_df.display()
-sample_control_df.display()
+#loop through fixed sets
+final_matched, disc_demos = mc.main_match(spark, cohort, full_df, ready_df)
 
 # COMMAND ----------
 
@@ -169,27 +138,44 @@ sample_control_df.display()
 
 # COMMAND ----------
 
+#check sample
+sample_exposed_df, sample_control_df = mc.sample_matches(final_matched, 3)
+sample_exposed_df.orderBy('match_key').display()
+sample_control_df.orderBy('match_key').display()
+
+# COMMAND ----------
+
 final_matched.groupby('category').agg(F.count('person_id').alias('count'), 
+                                F.round(F.sum('cancer')).alias('members with cancer'), 
+                                F.round(F.sum('diabetes')).alias('members with diabetes'), 
                                 F.round(F.mean('total_allowed0'), 2).alias('avg spend at period 0'), 
                                 F.round(F.mean('age'), 2).alias('avg age')
-                                ).show()
+                                ).display()
 
 # COMMAND ----------
 
 #add to final table
+# (
+#     final_matched
+#     .write
+#     .format("delta")
+#     .option("overwriteSchema", "true")
+#     .mode("append")
+#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts_matched")
+# )
 
 
 # COMMAND ----------
 
 #write data to table
-(
-    final_matched
-    .write
-    .format("delta")
-    .option("overwriteSchema", "true")
-    .mode("overwrite")
-    .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts_matched")
-)
+# (
+#     final_matched
+#     .write
+#     .format("delta")
+#     .option("overwriteSchema", "true")
+#     .mode("overwrite")
+#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts_matched")
+# )
 
 # COMMAND ----------
 

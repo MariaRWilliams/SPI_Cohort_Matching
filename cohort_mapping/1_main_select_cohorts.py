@@ -10,8 +10,6 @@
 # MAGIC Remaining Tasks:
 # MAGIC   - more flexible outlier handling
 # MAGIC   - incorporate Marketscan
-# MAGIC   - more dataset analytics
-# MAGIC   - change utilization column names up front (categories as well?)
 # MAGIC
 # MAGIC
 
@@ -74,6 +72,17 @@ mem_df = mem_df.dropDuplicates()
 
 # COMMAND ----------
 
+#pull in member chronic conditions data
+chron_df = pc.query_data(spark, dbutils, 'cohort_matching_cg_chron')
+
+#de-duplicate
+exprs = {x: "max" for x in chron_df.columns if x != 'dw_member_id' and x != 'cal_year' and x != 'table_schema'}
+chron_df = chron_df.groupBy('dw_member_id').agg(exprs)
+chron_df = chron_df.select(*[F.col(c).alias(c.replace('max(','')) for c in chron_df.columns])
+chron_df = chron_df.select(*[F.col(c).alias(c.replace(')','')) for c in chron_df.columns])
+
+# COMMAND ----------
+
 #set some frequently used variables
 #this should really be replaced with some useful stats about each
 pc.set_event_categories(event_df)
@@ -87,6 +96,19 @@ pc.set_claims_window(claims_df, claims_cap)
 
 # COMMAND ----------
 
+#limit customers - this should be updated so that we can use product data, once product data is available
+cust_list = ['ADVANTAGE SOLUTIONS','AMERICAN AIRLINES', 'BANK OF NEW YORK MELLON',
+                                            'BENEFITS4ME', 'CALIFORNIA ASSOCIATION OF HIGHWAY PATROLMEN','CBIZ',
+                                            'CHOCTAW NATION','CITY OF SEATTLE','COMMSCOPE','COUNTY OF SANTA BARBARA',
+                                            'CSL BEHRING','DUPONT','FIDELITY','FIRST AMERICAN FINANCIAL','GENERAL MILLS',
+                                            'GENTIVA','GREIF INC','HYATT HOTEL CORPORATION','INTERNATIONAL PAPER',
+                                            'INTUITIVE SURGICAL','L3HARRIS','LANDRYS INC',"LOWE'S",'MCKESSON','META',
+                                            'MOFFITT CANCER CENTER','NEVADA GOLD MINES','PAYPAL','PERATON','SAFRAN USA',
+                                            'SAN FRANCISCO HEALTH SERVICE SYSTEM','SEDGWICK','SEVEN ELEVEN','STATE FARM',
+                                            'UNIVERSITY OF CALIFORNIA']
+
+# COMMAND ----------
+
 #available event categories
 print(pc.event_list)
 
@@ -94,7 +116,7 @@ print(pc.event_list)
 
 #select event categories to use in exposed subset
 #select categories that should disqualify members from the exposed cohort (within clean window)
-exposed_categories = ['High Cost Claimants (HCC)', 'HCC Clinical Eng']
+exposed_categories = ['High Cost Claimants (HCC)', 'HCC Clinical Eng', 'Case Management - Adult', 'Case Management - Oncology']
 clean_categories = ['Disease Management', 'Treatment Decision Support', 'Maternity Program', 'Case Management']
 
 # COMMAND ----------
@@ -106,6 +128,11 @@ exposed_subset = pc.clean_exposed(spark, event_df, exposed_categories, clean_cat
 
 #add demographics and limit to those eligible for full evaluation window, and within claims data
 exposed_subset = pc.limit_exposed(exposed_subset, mem_df, eval_preperiod, eval_postperiod, claims_cap)
+
+# COMMAND ----------
+
+#limit to those from specific customers
+exposed_subset = exposed_subset.filter(F.col('edw_cust').isin(cust_list))
 
 # COMMAND ----------
 
@@ -168,6 +195,8 @@ trailing_list = ['total_allowed']
 
 #add claims for matching periods to both subsets and combine subsets into one dataset
 #also removes members with negative claims or utilization (data error)
+#crashes cluster sometimes... don't know why
+
 for subset in [exposed_subset, control_subset]:
     subset_claims = pc.merge_claims(spark, subset, claims_df, match_preperiod, match_postperiod)
     subset_claims = pc.pivot_claims(subset_claims, leading_list, trailing_list)
@@ -189,12 +218,16 @@ combined_cohorts.select('category', 'person_id').groupby('category').count().sho
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ###Add calculated features
-# MAGIC Age, sum of utilization, etc
+# MAGIC ###Add chronic conditions and calculated features
 
 # COMMAND ----------
 
-#add age
+#add chronic conditions
+combined_cohorts = combined_cohorts.join(chron_df, ['dw_member_id'], how='left').fillna(0)
+
+# COMMAND ----------
+
+#add age (exact age and age band)
 combined_cohorts = pc.calc_age(combined_cohorts)
 
 # COMMAND ----------
@@ -205,10 +238,20 @@ combined_cohorts = pc.sum_periods(combined_cohorts, trailing_list, 0, eval_postp
 
 # COMMAND ----------
 
-#combine Utilization
+#combine utilization
 combined_cohorts = combined_cohorts.withColumn('inpatient_-3to0sum', F.col('inpatient_medical_-3to0sum') + F.col('inpatient_surgical_-3to0sum'))
 combined_cohorts = combined_cohorts.withColumn('physician_-3to0sum', F.col('physician-pcp_visit_-3to0sum') + F.col('physician-specialist_visit_-3to0sum') + F.col('physician-preventive_-3to0sum'))
 
+
+# COMMAND ----------
+
+#add date as a scalable integer
+combined_cohorts = combined_cohorts.withColumn('date_int', F.round(F.unix_timestamp('utc_period'), 0))
+
+# COMMAND ----------
+
+#update zip code
+combined_cohorts = combined_cohorts.withColumn('zip_code', F.col('zip_code').cast(T.IntegerType())).fillna(0)
 
 # COMMAND ----------
 
@@ -227,12 +270,14 @@ continuous_variables.display()
 
 # COMMAND ----------
 
-#remove outliers
+#remove outliers: currently based on original specifications
 filtered_cohorts = combined_cohorts.filter(combined_cohorts['age']>17)
 filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['age']<71)
 
 for x in range(-3, 6):
     filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_allowed'+str(x)]<250000)
+
+filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_allowed_0to5sum']<250000)
 
 # COMMAND ----------
 
@@ -246,14 +291,14 @@ filtered_cohorts.select('category', 'person_id').groupby('category').count().sho
 # COMMAND ----------
 
 #write data to table
-(
-    filtered_cohorts
-    .write
-    .format("delta")
-    .option("overwriteSchema", "true")
-    .mode("overwrite")
-    .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts")
-)
+# (
+#     filtered_cohorts
+#     .write
+#     .format("delta")
+#     .option("overwriteSchema", "true")
+#     .mode("overwrite")
+#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts")
+# )
 
 # COMMAND ----------
 
