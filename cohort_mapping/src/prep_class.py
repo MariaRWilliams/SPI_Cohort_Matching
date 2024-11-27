@@ -15,11 +15,11 @@ class Data_Prep():
         self.min_claim = 0
         self.max_claim = 0
 
-    def query_data(self, spark, dbutils, table):
+    # def query_data(self, spark, dbutils, table):
 
-        df = spark.sql(f"""SELECT * FROM dev.`clinical-analysis`.{table}""")
+    #     df = spark.sql(f"""SELECT * FROM dev.`clinical-analysis`.{table}""")
 
-        return df
+    #     return df
 
     def set_event_categories(self, event_df):
 

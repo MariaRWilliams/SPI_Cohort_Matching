@@ -25,7 +25,7 @@ from src import data_class
 import pandas as pd
 
 pc = prep_class.Data_Prep()
-dec = data_class.Data_Stats()
+dec = data_class.Data_Processing()
 
 # COMMAND ----------
 
@@ -52,19 +52,19 @@ claims_cap = '2024-09-01'
 # COMMAND ----------
 
 #pull in event data
-event_df = pc.query_data(spark, dbutils, 'cohort_matching_edw_events')
+event_df = dec.query_data(spark, dbutils, 'cohort_matching_edw_events')
 event_df = event_df.withColumn('utc_period', F.to_date(event_df.utc_period, 'yyyyMM'))
 
 # COMMAND ----------
 
 #pull in claims and utilization data
-claims_df = pc.query_data(spark, dbutils, 'cohort_matching_cg_claims')
+claims_df = dec.query_data(spark, dbutils, 'cohort_matching_cg_claims')
 claims_df = claims_df.withColumn('service_month', F.to_date(claims_df.service_month, 'yyyyMM'))
 
 # COMMAND ----------
 
 #pull in member demographic data
-mem_df = pc.query_data(spark, dbutils, 'cohort_matching_cg_mem')
+mem_df = dec.query_data(spark, dbutils, 'cohort_matching_cg_mem')
 mem_df = mem_df.withColumn('start_date', F.trunc(F.to_date(mem_df.start_date, 'yyyyMM'), 'month'))
 mem_df = mem_df.withColumn('end_date', F.trunc(F.to_date(mem_df.end_date, 'yyyyMM'), 'month'))
 mem_df = mem_df.withColumn('birth_year', F.trunc(F.to_date(mem_df.birth_year, 'yyyyMM'), 'month'))
@@ -73,7 +73,7 @@ mem_df = mem_df.dropDuplicates()
 # COMMAND ----------
 
 #pull in member chronic conditions data
-chron_df = pc.query_data(spark, dbutils, 'cohort_matching_cg_chron')
+chron_df = dec.query_data(spark, dbutils, 'cohort_matching_cg_chron')
 
 #de-duplicate
 exprs = {x: "max" for x in chron_df.columns if x != 'dw_member_id' and x != 'cal_year' and x != 'table_schema'}
@@ -116,8 +116,8 @@ print(pc.event_list)
 
 #select event categories to use in exposed subset
 #select categories that should disqualify members from the exposed cohort (within clean window)
-exposed_categories = ['High Cost Claimants (HCC)', 'HCC Clinical Eng', 'Case Management - Adult', 'Case Management - Oncology']
-clean_categories = ['Disease Management', 'Treatment Decision Support', 'Maternity Program', 'Case Management']
+exposed_categories = ['High Cost Claimants (HCC)']
+clean_categories = ['Disease Management', 'Treatment Decision Support', 'Maternity Program', 'Case Management', 'Transition Care - Adult']
 
 # COMMAND ----------
 
@@ -153,10 +153,13 @@ print(pc.event_list)
 # COMMAND ----------
 
 #select event categories that are ok to have in control, otherwise control will be composed of members without any of the events
-control_ok_categories = ['Engaged']
+control_ok_categories = ['Care Navigation', 'Transition Care - Adult', 'Preventive Care', 'HCC Clinical Eng', 'Engaged', 'Rising Risk', 'Case Management - High Risk Maternity', 'Wellness Care', 'Case Management - Oncology', 'Case Management - Adult']
 
 #remove members with events
 control_subset = mem_df.join(event_df.filter(~F.col('category').isin(control_ok_categories)), on='person_id', how='left_anti')
+
+#limit to same customers as exposed
+control_subset = control_subset.filter(F.col('edw_cust').isin(cust_list))
 
 # COMMAND ----------
 
@@ -255,6 +258,45 @@ combined_cohorts = combined_cohorts.withColumn('zip_code', F.col('zip_code').cas
 
 # COMMAND ----------
 
+#add spend pattern indicators
+#percent medical, percent increase and decrease
+for x in range(-2, 2):
+  #dollar value change from previous month
+  combined_cohorts = combined_cohorts.withColumn('spend_increase'+str(x), F.round(F.when(F.col('total_allowed'+str(x))>0, F.col('total_allowed'+str(x))).otherwise(0) - 
+                                            F.when(F.col('total_allowed'+str(x-1))>0, F.col('total_allowed'+str(x-1))).otherwise(0), 2))
+
+  #change from previous month as a percent of total pre-intervention
+  combined_cohorts = combined_cohorts.withColumn('spend_increase_perc'+str(x), F.round( (F.when(F.col('total_allowed'+str(x))>0, F.col('total_allowed'+str(x))).otherwise(0) - 
+                                            F.when(F.col('total_allowed'+str(x-1))>0, F.col('total_allowed'+str(x-1))).otherwise(0)) / F.col('total_allowed_-3to0sum'), 2))
+
+for x in range(-3, 1):
+  #%spend
+  combined_cohorts = combined_cohorts.withColumn('spend_perc'+str(x), F.round( (F.when(F.col('total_allowed'+str(x))>0, F.col('total_allowed'+str(x)) / F.col('total_allowed_-3to0sum')).otherwise(0) ), 2))
+
+#percent of pre-intervention spend that is medical
+combined_cohorts = combined_cohorts.withColumn('med_percent', 
+                             F.round(F.when(F.col('med_allowed_-3to0sum') > 0, F.col('med_allowed_-3to0sum') / F.col('total_allowed_-3to0sum')).otherwise(0), 2))
+#categories
+combined_cohorts = combined_cohorts.withColumn('med_percent_cat', F.when(F.col('med_percent') < 0.5, '0-50%_med')
+                                                .otherwise(F.when(F.col('med_percent') < 0.9, '50-90%_med').otherwise('mostly_med')))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ##Some Data Cleaning
+
+# COMMAND ----------
+
+#if the person_id starts with DW, then there is a risk the id is not unique, so replace with dw_member_id
+combined_cohorts = combined_cohorts.withColumn('person_id', F.when(F.col('person_id').startswith('DW'), F.col('dw_member_id')).otherwise(F.col('person_id')))
+
+# COMMAND ----------
+
+combined_cohorts = combined_cohorts.distinct().fillna(0)
+combined_cohorts = combined_cohorts.distinct()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ###Remove Outliers
 
@@ -274,10 +316,11 @@ continuous_variables.display()
 filtered_cohorts = combined_cohorts.filter(combined_cohorts['age']>17)
 filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['age']<71)
 
-for x in range(-3, 6):
-    filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_allowed'+str(x)]<250000)
+# for x in range(-3, 6):
+#     filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_allowed'+str(x)]<250000)
 
-filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_allowed_0to5sum']<250000)
+# filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_allowed_0to5sum']<250000)
+# filtered_cohorts = filtered_cohorts.distinct()
 
 # COMMAND ----------
 

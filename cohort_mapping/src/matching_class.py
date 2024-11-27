@@ -55,6 +55,10 @@ class Cohort_Matching():
         df_transformed = df.select(*self.id_columns)
 
         for c in self.to_binary_columns:
+            df = df.withColumn(c, F.regexp_replace(c, '[^a-zA-Z0-9]', ''))
+            df = df.withColumn(c, F.regexp_replace(c, ' ', '_'))
+            df = df.withColumn(c, F.lower(F.col(c)))
+
             df_cat = (df
                     .select(*self.id_columns, c)
                     .groupBy(*self.id_columns)
@@ -86,9 +90,9 @@ class Cohort_Matching():
         ready_df = ready_df.na.fill(0)
 
         #adjust column names
-        ready_df = ready_df.select([F.col(x).alias(x.replace(' ', '_')) for x in ready_df.columns])
-        ready_df = ready_df.select([F.col(x).alias(x.replace('[^a-zA-Z0-9]', '')) for x in ready_df.columns])
-        ready_df = ready_df.select(*[x.lower() for x in ready_df.columns])
+        # ready_df = ready_df.select([F.col(x).alias(x.replace(' ', '_')) for x in ready_df.columns])
+        # ready_df = ready_df.select([F.col(x).alias(x.replace('[^a-zA-Z0-9]', '')) for x in ready_df.columns])
+        # ready_df = ready_df.select(*[x.lower() for x in ready_df.columns])
 
         #weight variables
         for col in self.weights:
@@ -224,20 +228,20 @@ class Cohort_Matching():
 
         return final_matched
     
-    def sample_matches(self, final_matched, num_sample):
+    # def sample_matches(self, final_matched, num_sample):
 
-        exposed_df = final_matched.filter(~F.col('category').contains('control'))
-        control_df = final_matched.filter(F.col('category').contains('control'))
+    #     exposed_df = final_matched.filter(~F.col('category').contains('control'))
+    #     control_df = final_matched.filter(F.col('category').contains('control'))
 
-        sample_exposed = exposed_df.withColumn('key',F.rand()).orderBy('key').limit(num_sample).cache()
-        sample_exposed = sample_exposed.drop('key')
+    #     sample_exposed = exposed_df.withColumn('key',F.rand()).orderBy('key').limit(num_sample).cache()
+    #     sample_exposed = sample_exposed.drop('key')
 
-        sample_list = sample_exposed.toPandas()
-        sample_list = sample_list['match_key'].to_list()
+    #     sample_list = sample_exposed.toPandas()
+    #     sample_list = sample_list['match_key'].to_list()
 
-        sample_control = control_df.filter(F.col('match_key').isin(sample_list))
+    #     sample_control = control_df.filter(F.col('match_key').isin(sample_list))
 
-        return sample_exposed, sample_control
+    #     return sample_exposed, sample_control
 
     def main_match(self, spark, cohort, full_df, ready_df):
 
@@ -251,23 +255,27 @@ class Cohort_Matching():
         ex_agg = exposed.groupby(*fixed_cols).agg(F.count('person_id').alias('exposed_count'))
         c_agg = control.groupby(*fixed_cols).agg(F.count('person_id').alias('control_count'))
         
-        demo_combos = ex_agg.join(c_agg, on=fixed_cols, how='left')
-        disc_demos = demo_combos.filter(F.col('control_count') <= self.n_list*40)
-        demo_combos = demo_combos.filter(F.col('control_count') > self.n_list*40)
+        demo_combos_full = ex_agg.join(c_agg, on=fixed_cols, how='left')
+        # disc_demos = demo_combos_full.filter(F.col('control_count') <= self.n_list*40)
+        #demo_combos = demo_combos_full.filter(F.col('control_count') > self.n_list*40)
+        demo_combos = demo_combos_full.filter(F.col('control_count') > self.n_list)
 
         dc_num = len(demo_combos.collect())
         counter = 1
 
         for row in demo_combos.rdd.toLocalIterator():
-        #for row in demo_combos.limit(2).rdd.toLocalIterator():
+        #for row in demo_combos.limit(1).rdd.toLocalIterator():
             print('Processing '+cohort+' '+str(counter)+' of '+str(dc_num))
 
             this_control = control
             this_exposed = exposed
 
-            for x in fixed_cols:
-                this_control = this_control.filter(this_control[x] == row[x])
-                this_exposed = this_exposed.filter(this_exposed[x] == row[x])
+            this_control = this_control.join(spark.createDataFrame([row]), on=fixed_cols, how='leftsemi')
+            this_exposed = this_exposed.join(spark.createDataFrame([row]), on=fixed_cols, how='leftsemi')
+            
+            # for x in fixed_cols:
+            #     this_control = this_control.filter(this_control[x] == row[x])
+            #     this_exposed = this_exposed.filter(this_exposed[x] == row[x])
  
             # does this add more time than useful? 
             # control = control.join(this_control, on=self.id_columns, how='anti')
@@ -321,13 +329,7 @@ class Cohort_Matching():
                 counter = counter+1
 
         print('Matching Complete')
-        return final_matched.distinct(), disc_demos
-
-
-
-
-
-
+        return final_matched.distinct(), demo_combos_full
 
 
 

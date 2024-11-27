@@ -7,16 +7,16 @@
 
 # COMMAND ----------
 
-from src import prep_class
+from src import data_class
 import pyspark.sql.functions as F
 
-pc = prep_class.Data_Prep()
+dc = data_class.Data_Processing()
 
 # COMMAND ----------
 
 #matched_df has matching variables, details_df has additional information
-matched_df = pc.query_data(spark, dbutils, 'cohort_matching_cohorts_matched')
-details_df = pc.query_data(spark, dbutils, 'cohort_matching_cohorts')
+matched_df = dc.query_data(spark, dbutils, 'cohort_matching_cohorts_matched')
+details_df = dc.query_data(spark, dbutils, 'cohort_matching_cohorts')
 
 # COMMAND ----------
 
@@ -28,10 +28,14 @@ details_df.columns
 #choose id columns, and variables for analysis
 join_id_col = ['person_id', 'category', 'utc_period']
 display_id_col = ['category']
-compare_col_prefix = ['total_allowed']
 
-#only works with one prefix- fix that
-col = display_id_col + [column for column in details_df.columns if column.startswith(tuple(compare_col_prefix)) and not column.endswith('sum')]
+#compare_col_prefix = ['total_allowed']
+#col = display_id_col + [column for column in details_df.columns if column.startswith(tuple(compare_col_prefix)) and not column.endswith('sum')]
+
+#doing this way to order the columns in the final graph
+compare_col = ['total_allowed-3', 'total_allowed-2', 'total_allowed-1', 'total_allowed0', 'total_allowed1', 'total_allowed2', 'total_allowed3', 'total_allowed4', 'total_allowed5']
+
+col = display_id_col + compare_col
 
 # COMMAND ----------
 
@@ -46,7 +50,7 @@ col = display_id_col + [column for column in details_df.columns if column.starts
 agg_df = matched_df.groupby('category').agg(F.count('person_id').alias('count'), 
                                 F.round(F.sum('cancer')).alias('members with cancer'), 
                                 F.round(F.sum('diabetes')).alias('members with diabetes'), 
-                                F.round(F.mean('total_allowed-1'), 2).alias('avg spend at period -1'), 
+                                F.round(F.mean('total_allowed0'), 2).alias('avg spend at time of int'), 
                                 F.round(F.mean('age'), 2).alias('avg age'),
                                 F.min('utc_period').alias('min interaction period'),
                                 F.max('utc_period').alias('max interaction period')
@@ -57,24 +61,63 @@ agg_df.display()
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ###Samples
+
+# COMMAND ----------
+
+sample_category = 'HCC Clinical Eng'
+sample_num = 5
+
+sample_exposed_df, sample_control_df = dc.sample_matches(matched_df, sample_num, sample_category)
+sample_exposed_df.orderBy('match_key').display()
+sample_control_df.orderBy('match_key').display()
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ###Chart
 
 # COMMAND ----------
 
 #join comparison details to matched cohort
-matched_df = matched_df.withColumn('category_long', matched_df['category'])
-matched_df = matched_df.withColumn('category', F.when(F.col('category').contains('control'), 'control').otherwise(F.col('category')))
+full_df = matched_df.withColumn('category_long', matched_df['category'])
+full_df = full_df.withColumn('category', F.when(F.col('category').contains('control'), 'control').otherwise(F.col('category')))
 
-full_df = matched_df.alias('df1').join(details_df.alias('df2'), join_id_col, 'left').select('df2.*', 'category_long')
+full_df = full_df.alias('df1').join(details_df.alias('df2'), join_id_col, 'left').select('df2.*', 'category_long', 'match_key')
 full_df = full_df.withColumn('category', full_df['category_long']).distinct()
 
 # COMMAND ----------
 
-chart_df = full_df.select(*col)
-chart_df = chart_df.groupby(*display_id_col).agg(*[F.round(F.avg(F.col(x)),2).alias(x) for x in col if x not in join_id_col])
-chart_df.display()
+#download details
+#d_df = full_df.filter(full_df['category'].contains('Case Management - Adult')).orderBy('match_key').display()
+#d_df = full_df.filter(full_df['category'].contains('HCC Clinical Eng')).orderBy('match_key').limit(100).display()
 
-chart_df = chart_df.toPandas()
-chart_df = chart_df[col].set_index('category').T
-#print(chart_df)
-chart_df.plot.line(figsize = (15,5), title = compare_col_prefix[0]).vlines(x=3, ymin=0, ymax=chart_df.to_numpy().max(), ls='--')
+# COMMAND ----------
+
+#chart
+cats = full_df.select('category').distinct().toPandas()['category'].tolist()
+cats = [x for x in cats if 'control' not in x]
+
+for this in cats:
+
+  chart_df = full_df.filter(full_df['category'].contains(this)).select(*col).orderBy('category')
+  chart_df = chart_df.groupby(*display_id_col).agg(*[F.round(F.avg(F.col(x)),2).alias(x) for x in col if x not in join_id_col])
+  #chart_df.display()
+
+  chart_df = chart_df.toPandas()
+  chart_df = chart_df[col].set_index('category').T
+  #print(chart_df)
+  chart_df.plot.line(figsize = (9,3), title = this, rot=30).vlines(x=3, ymin=0, ymax=chart_df.to_numpy().max(), ls='--')
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ###Optional
+
+# COMMAND ----------
+
+#reload
+# import importlib
+# from src import data_class
+# importlib.reload(data_class)
+# dc = data_class.Data_Processing()

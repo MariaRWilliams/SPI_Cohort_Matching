@@ -150,3 +150,51 @@ class QueryClass():
               """
 
         return q
+
+    def query_TPE_enrollment(self, start_year, customer_list):
+           
+        q = f"""
+              select distinct pmc.person_id
+                            , pmc.drvd_mbrshp_covrg_id
+                            , dtl.utc_period
+                            , dtl.partner_org_nm as category
+                            , 'TPE Enrollment'   as subcategory
+                from info_layer.v1_uat_ext_encounter_dtl dtl
+                        inner join info_layer.vw_cust_svc_yr svc
+                                    on to_char(start_dtm, 'YYYYMM') between svc.svc_period_start and svc.svc_period_end
+                                        and upper(dtl.org_nm) = upper(svc.org_nm)
+                        inner join acp_edw.info_layer.prs_mbrshp_covrg pmc
+                                    on upper(dtl.drvd_mbrshp_covrg_id) = upper(pmc.drvd_mbrshp_covrg_id)
+                                        and dtl.utc_period = pmc.utc_period
+                where dtl.start_dtm is not null -- means enrolled per closed loop Qlik
+                and dtl.end_dtm is not null   -- means graduated per closed loop Qlik
+                and left(dtl.utc_period, 4) >= '{start_year}'
+                and pmc.org_nm in ('{customer_list}')
+              """
+
+        return q
+    
+    def query_outreach(self, start_year, customer_list):
+           
+        q = f"""
+                select distinct td.person_id
+                                , td.drvd_mbrshp_covrg_id
+                                , mc.utc_period
+                                , 'Outreach' as category
+                                , td.objtv_type_nm as subcategory
+                                --, td.rsn_cd
+                                --, mc.enctr_id
+                                --, td.task_cd
+                FROM info_layer.mstr_comm mc
+                        INNER JOIN info_layer.mstr_comm mc2 ON mc2.drvd_comm_id = mc.drvd_comm_id
+                        LEFT JOIN  info_layer.task_dtl td ON td.enctr_id = mc2.enctr_id AND
+                                                            td.task_sts NOT IN
+                                                            ('duplicate', 'rejected', 'cancelled', 'entered-in-error', 'draft') AND
+                                                            td.deleted_flg <> 1
+                WHERE task_cd like '%outreach%'
+                and mc.drvd_comm_result = 'CONTACT MADE'
+                and left(mc.utc_period, 4) >= '{start_year}'
+                and mc.drvd_org_nm in ('{customer_list}')
+              """
+
+        return q
