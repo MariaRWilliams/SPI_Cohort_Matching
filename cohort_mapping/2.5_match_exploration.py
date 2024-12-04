@@ -89,7 +89,7 @@ disc_df.groupby('category').agg(F.count('person_id').alias('member_count'),
 
 # COMMAND ----------
 
-#together to check for issues: duplicates caused by zip code
+#together to check for issues: duplicates caused by zip code?
 full_df.groupby('category').agg(F.count('person_id').alias('member_count'), 
                                 F.round(F.mean('total_allowed0'), 2).alias('avg spend at period 0'), 
                                 F.round(F.mean('age'), 2).alias('avg age'),

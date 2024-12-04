@@ -227,21 +227,6 @@ class Cohort_Matching():
         final_matched = final_matched.withColumn('match_key', F.concat(F.lit(prefix), F.lit('_'), final_matched.match_key))
 
         return final_matched
-    
-    # def sample_matches(self, final_matched, num_sample):
-
-    #     exposed_df = final_matched.filter(~F.col('category').contains('control'))
-    #     control_df = final_matched.filter(F.col('category').contains('control'))
-
-    #     sample_exposed = exposed_df.withColumn('key',F.rand()).orderBy('key').limit(num_sample).cache()
-    #     sample_exposed = sample_exposed.drop('key')
-
-    #     sample_list = sample_exposed.toPandas()
-    #     sample_list = sample_list['match_key'].to_list()
-
-    #     sample_control = control_df.filter(F.col('match_key').isin(sample_list))
-
-    #     return sample_exposed, sample_control
 
     def main_match(self, spark, cohort, full_df, ready_df):
 
@@ -273,13 +258,6 @@ class Cohort_Matching():
             this_control = this_control.join(spark.createDataFrame([row]), on=fixed_cols, how='leftsemi')
             this_exposed = this_exposed.join(spark.createDataFrame([row]), on=fixed_cols, how='leftsemi')
             
-            # for x in fixed_cols:
-            #     this_control = this_control.filter(this_control[x] == row[x])
-            #     this_exposed = this_exposed.filter(this_exposed[x] == row[x])
- 
-            # does this add more time than useful? 
-            # control = control.join(this_control, on=self.id_columns, how='anti')
-            # exposed = exposed.join(this_exposed, on=self.id_columns, how='anti')
             print('datasets prepared')
 
             #make index
