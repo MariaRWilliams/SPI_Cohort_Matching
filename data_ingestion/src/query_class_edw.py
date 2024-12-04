@@ -156,18 +156,22 @@ class QueryClass():
         q = f"""
               select distinct pmc.person_id
                             , pmc.drvd_mbrshp_covrg_id
-                            , dtl.utc_period
+                            , cast(dtl.utc_period as integer) as utc_period
                             , dtl.partner_org_nm as category
                             , 'TPE Enrollment'   as subcategory
-                from info_layer.v1_uat_ext_encounter_dtl dtl
-                        inner join info_layer.vw_cust_svc_yr svc
+                from acp_edw.info_layer.v1_uat_ext_encounter_dtl dtl
+                        inner join acp_edw.info_layer.vw_cust_svc_yr svc
                                     on to_char(start_dtm, 'YYYYMM') between svc.svc_period_start and svc.svc_period_end
                                         and upper(dtl.org_nm) = upper(svc.org_nm)
                         inner join acp_edw.info_layer.prs_mbrshp_covrg pmc
                                     on upper(dtl.drvd_mbrshp_covrg_id) = upper(pmc.drvd_mbrshp_covrg_id)
                                         and dtl.utc_period = pmc.utc_period
-                where dtl.start_dtm is not null -- means enrolled per closed loop Qlik
-                and dtl.end_dtm is not null   -- means graduated per closed loop Qlik
+                where dtl.start_dtm is not null     -- means enrolled per closed loop Qlik
+                and dtl.end_dtm is not null         -- means graduated per closed loop Qlik
+                and pmc.acp_mbr_flg = 1
+                and dtl.partner_org_nm in ('Carrot','Carrum Health','Cylinder','Equip Health','FOLX Health',
+                                            'Headspace Care','Hinge Health','Kindbody','Lantern','Lyra',
+                                            'Rx Savings Solutions','SurgeryPlus','Sword','Virta Health','WellRight')
                 and left(dtl.utc_period, 4) >= '{start_year}'
                 and pmc.org_nm in ('{customer_list}')
               """
