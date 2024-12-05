@@ -48,9 +48,23 @@ class Data_Processing():
         sample_exposed = exposed_df.withColumn('key',F.rand()).orderBy('key').limit(num_sample).cache()
         sample_exposed = sample_exposed.drop('key')
 
-        sample_list = sample_exposed.toPandas()
-        sample_list = sample_list['match_key'].to_list()
-
-        sample_control = control_df.filter(F.col('match_key').isin(sample_list))
+        sample_control = control_df.join(sample_exposed.withColumn('category',F.concat(sample_exposed.category, F.lit(' control')))
+                                                        .select('match_key', 'category'), on=['match_key', 'category'], how='inner')
 
         return sample_exposed, sample_control
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
