@@ -306,7 +306,7 @@ class Cohort_Matching():
                 
                 counter = counter+1
 
-        print('Matching Complete')
+        print(cohort + ' Matching Complete')
         return final_matched.distinct(), demo_combos_full
 
 

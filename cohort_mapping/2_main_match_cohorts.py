@@ -28,13 +28,8 @@ full_df = dc.query_data(spark, dbutils, 'cohort_matching_cohorts')
 # COMMAND ----------
 
 #stats: what else would be useful? do both before and after
-full_df.filter(F.col('total_allowed0')>0).groupby('category').agg(F.count('person_id').alias('member_count'), 
-                                F.round(F.mean('total_allowed-1'), 2).alias('avg spend at mo-1'), 
+full_df.groupby('category').agg(F.count(F.lit(1)).alias('record_count'), 
                                 F.round(F.mean('total_allowed0'), 2).alias('avg spend at mo0'), 
-                                F.round(F.mean('total_allowed_-3to0sum'), 2).alias('avg spend -3 mo'), 
-                                # F.round(F.mean('spend_increase0'), 2).alias('avg spend+ at mo0'), 
-                                # F.round(F.mean('spend_increase_perc0'), 2).alias('avg spend+ perc at mo0'), 
-                                # F.round(F.mean('med_percent'), 2).alias('avg %medical -3 mo'), 
                                 F.round(F.mean('age'), 2).alias('avg age'),
                                 F.min('utc_period').alias('min_period'),
                                 F.max('utc_period').alias('max_period'),
@@ -52,55 +47,42 @@ full_df.columns
 
 # COMMAND ----------
 
-#curently, the binary columns are used for the index and the scale columns are used for similarity matching
+#currently, the binary columns are used for the index and the scale columns are used for similarity matching
 #in the future, may need to separate lists of columns to scale/encode and list of columns to index/match
 mc.id_columns = ['person_id', 'category', 'utc_period']
 
 #select variables used for indexing (perfect match)
 mc.binary_columns = []
-
-mc.to_binary_columns = ['carrier', 'edw_cust']
+mc.to_binary_columns = ['age_band', 'sex']
 
 #select variables used for closest match
-mc.scale_columns = [
-                    # 'spend_increase_perc1',
-                    # 'spend_increase_perc-2',
-                    # 'spend_increase_perc-1',
-                    # 'spend_increase_perc0',
-                    # 'total_allowed_-3to0sum',
-                    'total_allowed-1',
+mc.scale_columns = ['total_allowed-1',
                     'total_allowed-2',
                     'total_allowed-3',
                     'total_allowed0',
-                    # 'spend_perc-3',
-                    # 'spend_perc-2',
-                    # 'spend_perc-1',
-                    # 'spend_perc0',
                     'inpatient_-3to0sum',
                     'emergency_room_-3to0sum',
                     'physician_-3to0sum',
-                    # 'med_percent',
                     'age',
+                    'cancer',
                     'chf',
                     'cad',
                     'hyperlipidemia',
                     'copd',
                     'diabetes',
-                    'cancer',
                     'osteoarthritis',
-                    'date_int'
+                    'date_int',
+                    # 'med_percent',
+                    'outpatient_services_0to5sum',
+                    'inpatient_0to5sum'
                 ]
 
 #dictionary of weights (weighted after scaling)
 mc.weights = {
-            'total_allowed-1':1,
-            'total_allowed-2':2,
+            'total_allowed-1':3,
+            'total_allowed-2':3,
             'total_allowed-3':3,
-            'total_allowed0':5,
-            # 'spend_perc-3':10,
-            # 'spend_perc-2':10,
-            # 'spend_perc-1':10,
-            # 'spend_perc0':10
+            'total_allowed0':3,
               }
 
 mc.final_columns = mc.id_columns + mc.binary_columns + mc.scale_columns + mc.to_binary_columns
@@ -108,15 +90,6 @@ mc.final_columns = mc.id_columns + mc.binary_columns + mc.scale_columns + mc.to_
 # COMMAND ----------
 
 ready_df = mc.full_transformation(full_df)
-
-# COMMAND ----------
-
-#reload
-# import importlib
-# from src import matching_class
-
-# importlib.reload(matching_class)
-# mc = matching_class.Cohort_Matching()
 
 # COMMAND ----------
 
@@ -133,9 +106,9 @@ mc.num_final_matches = 1
 #nlist = the number of cells to cluster the control into (4 * sqrt(n) is standard?)
 #nprobe = the number of cells to check for the nearest neighbors
 #max_distance = (look into this one- what distance does FAISS return? euclidian?)
-mc.n_list = 50
-mc.n_probe = 10
-mc.max_distance = 70
+mc.n_list = 10
+mc.n_probe = 8
+mc.max_distance = 50
 
 # COMMAND ----------
 
@@ -153,11 +126,15 @@ print(ready_df.select('category').distinct().toPandas()['category'].to_list())
 
 # COMMAND ----------
 
-#for cohort in ready_df.select('category').distinct().toPandas()['category'].to_list():
-cohort =  'High Cost Claimants (HCC)'
+match_cat = ['Carrum Health', 'Lantern']
+for cohort in match_cat:
 
-#loop through fixed sets
-final_matched, demo_combos_full = mc.main_match(spark, cohort, full_df, ready_df)
+    matched, demo_combos_full = mc.main_match(spark, cohort, full_df, ready_df)
+
+    if cohort == match_cat[0]:
+        final_matched = matched
+    else:
+        final_matched = final_matched.union(matched)
 
 # COMMAND ----------
 
@@ -167,19 +144,21 @@ final_matched, demo_combos_full = mc.main_match(spark, cohort, full_df, ready_df
 # COMMAND ----------
 
 #statistics of original cohort
-full_df.groupby('category').agg(F.count('person_id').alias('count'), 
+full_df.groupby('category').agg(F.count(F.lit(1)).alias('record_count'), 
+                                F.round(F.mean('total_allowed0'), 2).alias('avg spend at mo0'), 
                                 F.round(F.mean('age'), 2).alias('avg age'),
-                                F.round(F.mean('total_allowed0'), 2).alias('avg total mo0'), 
-                                F.round(F.mean('total_allowed-1'), 2).alias('avg total mo-1'), 
+                                F.min('utc_period').alias('min_period'),
+                                F.max('utc_period').alias('max_period'),
                                 ).orderBy('category').display()
 
 # COMMAND ----------
 
 #statistics for matched cohort
-final_matched.groupby('category').agg(F.count('person_id').alias('count'), 
+final_matched.groupby('category').agg(F.count(F.lit(1)).alias('record_count'), 
+                                F.round(F.mean('total_allowed0'), 2).alias('avg spend at mo0'), 
                                 F.round(F.mean('age'), 2).alias('avg age'),
-                                F.round(F.mean('total_allowed0'), 2).alias('avg total mo0'), 
-                                F.round(F.mean('total_allowed-1'), 2).alias('avg total mo-1'), 
+                                F.min('utc_period').alias('min_period'),
+                                F.max('utc_period').alias('max_period'),
                                 ).orderBy('category').display()
 
 # COMMAND ----------
@@ -193,18 +172,28 @@ matched_df = matched_df.withColumn('category', matched_df['category_long']).dist
 
 # COMMAND ----------
 
+#statistics for matched cohort with details (created duplicates?)
+matched_df.groupby('category').agg(F.count(F.lit(1)).alias('record_count'), 
+                                F.round(F.mean('total_allowed0'), 2).alias('avg spend at mo0'), 
+                                F.round(F.mean('age'), 2).alias('avg age'),
+                                F.min('utc_period').alias('min_period'),
+                                F.max('utc_period').alias('max_period'),
+                                ).orderBy('category').display()
+
+# COMMAND ----------
+
+#chart
+chart_category = 'Lantern'
 join_id_col = ['person_id', 'category', 'utc_period']
 display_id_col = ['category']
 compare_col = ['total_allowed-3', 'total_allowed-2', 'total_allowed-1', 'total_allowed0', 'total_allowed1', 'total_allowed2', 'total_allowed3', 'total_allowed4', 'total_allowed5']
 
 col = display_id_col + compare_col
-
-chart_df = matched_df.groupby(*display_id_col).agg(*[F.round(F.avg(F.col(x)),2).alias(x) for x in col if x not in join_id_col])
+chart_df = matched_df.filter(F.col('category').startswith(chart_category)).groupby(*display_id_col).agg(*[F.round(F.avg(F.col(x)),2).alias(x) for x in col if x not in join_id_col])
 #chart_df.display()
 
 chart_df = chart_df.toPandas()
 chart_df = chart_df[col].set_index('category').T
-#print(chart_df)
 chart_df.plot.line(figsize = (9,3), rot=30).vlines(x=3, ymin=0, ymax=chart_df.to_numpy().max(), ls='--')
 
 # COMMAND ----------
@@ -213,6 +202,23 @@ chart_df.plot.line(figsize = (9,3), rot=30).vlines(x=3, ymin=0, ymax=chart_df.to
 sample_exposed_df, sample_control_df = dc.sample_matches(final_matched, 3)
 sample_exposed_df.orderBy('match_key').display()
 sample_control_df.orderBy('match_key').display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ###Write Data to Table
+
+# COMMAND ----------
+
+#write data to table
+# (
+#     final_matched
+#     .write
+#     .format("delta")
+#     .option("overwriteSchema", "true")
+#     .mode("overwrite")
+#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts_matched")
+# )
 
 # COMMAND ----------
 
@@ -229,12 +235,9 @@ sample_control_df.orderBy('match_key').display()
 
 # COMMAND ----------
 
-#write data to table
-# (
-#     final_matched
-#     .write
-#     .format("delta")
-#     .option("overwriteSchema", "true")
-#     .mode("overwrite")
-#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts_matched")
-# )
+#reload
+# import importlib
+# from src import matching_class
+
+# importlib.reload(matching_class)
+# mc = matching_class.Cohort_Matching()

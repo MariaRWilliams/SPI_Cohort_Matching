@@ -157,7 +157,7 @@ class QueryClass():
               select distinct pmc.person_id
                             , pmc.drvd_mbrshp_covrg_id
                             , cast(dtl.utc_period as integer) as utc_period
-                            , dtl.partner_org_nm as category
+                            , case when dtl.partner_org_nm = 'SurgeryPlus' then 'Lantern' else dtl.partner_org_nm end as category
                             , 'TPE Enrollment'   as subcategory
                 from acp_edw.info_layer.v1_uat_ext_encounter_dtl dtl
                         inner join acp_edw.info_layer.vw_cust_svc_yr svc
