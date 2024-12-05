@@ -40,9 +40,17 @@ full_df = full_df.withColumn('category', full_df['category_long']).distinct()
 
 # COMMAND ----------
 
+#reload
+# import importlib
+# from src import data_class
+# importlib.reload(data_class)
+# dc = data_class.Data_Processing()
+
+# COMMAND ----------
+
 #check sample (can leave off sample category)
-sample_category = 'HCC Clinical Eng'
-sample_num = 2
+sample_category = 'Virta'
+sample_num = 3
 
 #sample_exposed_df, sample_control_df = dc.sample_matches(matched_df, sample_num, sample_category)
 sample_exposed_df, sample_control_df = dc.sample_matches(full_df, sample_num)
@@ -58,7 +66,7 @@ sample_control_df.orderBy('match_key').display()
 
 #original cohort stats
 details_df = details_df.distinct()
-details_df.groupby('category').agg(F.count('person_id').alias('member_count'), 
+details_df.groupby('category').agg(F.count(F.lit(1)).alias('record_count'),  
                                 F.round(F.mean('total_allowed0'), 2).alias('avg spend at period 0'), 
                                 F.round(F.mean('age'), 2).alias('avg age'),
                                 F.min('utc_period').alias('min_period'),
@@ -68,7 +76,7 @@ details_df.groupby('category').agg(F.count('person_id').alias('member_count'),
 # COMMAND ----------
 
 #matched cohort stats
-matched_df.groupby('category').agg(F.count('person_id').alias('member_count'), 
+matched_df.groupby('category').agg(F.count(F.lit(1)).alias('record_count'), 
                                 F.round(F.mean('total_allowed0'), 2).alias('avg spend at period 0'), 
                                 F.round(F.mean('age'), 2).alias('avg age'),
                                 F.min('utc_period').alias('min_period'),
@@ -80,7 +88,7 @@ matched_df.groupby('category').agg(F.count('person_id').alias('member_count'),
 #discarded cohort stats
 disc_df = details_df.join(matched_df, on=join_id_col, how='leftanti')
 
-disc_df.groupby('category').agg(F.count('person_id').alias('member_count'), 
+disc_df.groupby('category').agg(F.count(F.lit(1)).alias('record_count'), 
                                 F.round(F.mean('total_allowed0'), 2).alias('avg spend at period 0'), 
                                 F.round(F.mean('age'), 2).alias('avg age'),
                                 F.min('utc_period').alias('min_period'),
@@ -90,7 +98,7 @@ disc_df.groupby('category').agg(F.count('person_id').alias('member_count'),
 # COMMAND ----------
 
 #together to check for issues: duplicates caused by zip code?
-full_df.groupby('category').agg(F.count('person_id').alias('member_count'), 
+full_df.groupby('category').agg(F.count(F.lit(1)).alias('record_count'), 
                                 F.round(F.mean('total_allowed0'), 2).alias('avg spend at period 0'), 
                                 F.round(F.mean('age'), 2).alias('avg age'),
                                 F.min('utc_period').alias('min_period'),
@@ -125,13 +133,6 @@ for this in cats:
 
 # COMMAND ----------
 
-cust_list = full_df.select('edw_cust').distinct().toPandas()['edw_cust'].to_list()
-
-print('Customer Count: '+str(len(cust_list)))
-#print(cust_list)
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ####(Work area: optimizing some other logic)
 
@@ -140,54 +141,3 @@ print('Customer Count: '+str(len(cust_list)))
 tester = matched_df.limit(10000)
 tester2 = matched_df.limit(10000)
 
-
-# COMMAND ----------
-
-fixed_cols = ['cancer', 'hyperlipidemia', 'diabetes', 'osteoarthritis', 'depression']
-n_list = 2
-cohort = 'High Cost Claimants (HCC)'
-
-# COMMAND ----------
-
-#checking
-control = matched_df.filter(matched_df['category']=='High Cost Claimants (HCC) control')
-exposed = matched_df.filter(matched_df['category']==cohort)
-
-c_agg = control.groupby(*fixed_cols).agg(F.count('person_id').alias('control_count'))
-ex_agg = exposed.groupby(*fixed_cols).agg(F.count('person_id').alias('exposed_count'))
-
-demo_combos = c_agg.join(ex_agg, on=fixed_cols, how='left')
-demo_combos.filter(F.col('control_count') <= n_list*40)
-
-dc_num = len(demo_combos.collect())
-counter = 1
-
-#for row in demo_combos.rdd.toLocalIterator():
-for row in demo_combos.limit(2).rdd.toLocalIterator():
-    print('Processing '+cohort+' '+str(counter)+' of '+str(dc_num))
-
-    this_control = control
-    this_exposed = exposed
-    print(control.count())
-
-    # for x in fixed_cols:
-    #     this_control = this_control.filter(this_control[x] == row[x])
-    #     this_exposed = this_exposed.filter(this_exposed[x] == row[x])
-    this_control = this_control.join(spark.createDataFrame([row]), on=fixed_cols, how='leftsemi')
-    this_exposed = this_exposed.join(spark.createDataFrame([row]), on=fixed_cols, how='leftsemi')
-
-    print('datasets prepared')
-
-    control = control.join(this_control, on=control.columns, how='anti')
-    exposed = exposed.join(this_exposed, on=control.columns, how='anti')
-    print(control.count())
-
-    counter = counter+1
-
-# COMMAND ----------
-
-#reload
-# import importlib
-# from src import data_class
-# importlib.reload(data_class)
-# dc = data_class.Data_Processing()
