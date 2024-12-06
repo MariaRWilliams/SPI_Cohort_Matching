@@ -7,7 +7,7 @@ load_dotenv()
 class SQLConnector:
     def __init__(self, server: str ='edw'):
         self.port = 5439
-        if server.lower() in ['edw', 'cg']:
+        if server.lower() in ['edw', 'cg', 'ms']:
             self.host = os.environ[f'{server.upper()}_HOST']
             self.user = os.environ[f'{server.upper()}_USER']
             self.db_name = os.environ[f'{server.upper()}_DB']

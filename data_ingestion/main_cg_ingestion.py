@@ -2,17 +2,19 @@
 # Code must be run on a local machine and uploaded to Databricks
 
 from src.query_class_cg import QueryClass
+from src.query_class_conditions import ConditionsClass
 from src.helper_class import CG_Helper
 from src.connector_class import SQLConnector
 import pandas as pd
 
 cg_conn = SQLConnector('cg')
 cg_queries = QueryClass()
+cond_queries = ConditionsClass()
 cg_helper = CG_Helper()
 file_path = 'data_ingestion/src_data/'
 
 svc_year = '2024'
-export_ver = '05'
+export_ver = '07'
 
 from warnings import filterwarnings
 filterwarnings("ignore", category=UserWarning, message='.*pandas only supports SQLAlchemy connectable.*')
@@ -30,7 +32,7 @@ for x in range(len(schema_df.index)):
     customer_df = pd.concat([customer_df, c_df])
             
 cust_df = cg_helper.map_customers_schema(customer_df, schema_df)
-#cust_df = cust_df[cust_df['edw_cust'].isin(['E AND J GALLO WINERY'])]
+cust_df = cust_df[cust_df['edw_cust'].isin(['E AND J GALLO WINERY', 'FIDELITY'])]
 print(str(len(cust_df['edw_cust'].unique()))+" Customer(s) selected")
 
 claims_df = pd.DataFrame()
@@ -64,20 +66,26 @@ for x in cust_df['table_schema'].unique().tolist():
     claims_df = pd.concat([claims_df, schema_claims_df])
 
 member_demo_df = pd.DataFrame()
-member_chron_df = pd.DataFrame()
 for x in cust_df['table_schema'].unique().tolist():
     
     print("Running Demographics Query for "+x)
     sql_statement = cg_queries.query_demographics(x, svc_year)
     temp_df = cg_conn.query_data(sql_statement)
-    temp_df['table_schema'] = x
     member_demo_df = pd.concat([member_demo_df, temp_df])
     
-    print("Running Chronic Conditions Query for "+x)
-    sql_statement = cg_queries.query_conditions(x, svc_year)
+sql_statement = cond_queries.temp_conditions()
+cg_conn.create_table(sql_statement)
+member_chron_df = pd.DataFrame()
+for x in cust_df['table_schema'].unique().tolist():
+    
+    print("Running Chronic Conditions Query for "+x)   
+    sql_statement = cond_queries.temp_conditions_cg(x)
+    cg_conn.create_table(sql_statement)
+    sql_statement = cond_queries.query_conditions()
     temp_df = cg_conn.query_data(sql_statement)
-    #temp_df['table_schema'] = x
     member_chron_df = pd.concat([member_chron_df, temp_df])
+    
+member_chron_df = member_chron_df.rename(columns = {'member_id':'dw_member_id'})
     
 member_demo_df = cg_helper.map_customers_member(member_demo_df, cust_df)
 member_demo_df = cg_helper.map_industry(member_demo_df)
