@@ -1,16 +1,16 @@
 # Databricks notebook source
 # MAGIC %md
+# MAGIC
 # MAGIC ##Create Datasets for Event Subset and Control Subset
 # MAGIC Steps Contained in this Notebook:
-# MAGIC   - load and clean data
-# MAGIC   - choose 'exposed' / 'control' subsets from Accolade data or Marketscan
-# MAGIC   - manipulate matching variables
-# MAGIC   - export to Data Catalog
+# MAGIC    - load and clean data
+# MAGIC    - choose 'exposed' / 'control' subsets from Accolade data or Marketscan
+# MAGIC    - manipulate matching variables
+# MAGIC    - export to Data Catalog
 # MAGIC
 # MAGIC Remaining Tasks:
-# MAGIC   - more flexible outlier handling
-# MAGIC   - incorporate Marketscan
-# MAGIC
+# MAGIC    - more flexible outlier handling
+# MAGIC    - incorporate Marketscan
 # MAGIC
 
 # COMMAND ----------
@@ -25,7 +25,7 @@ from src import data_class
 import pandas as pd
 
 pc = prep_class.Data_Prep()
-dec = data_class.Data_Stats()
+dec = data_class.Data_Processing()
 
 # COMMAND ----------
 
@@ -41,8 +41,8 @@ eval_postperiod = 5
 match_preperiod = 3
 match_postperiod = 5
 
-#claims max: what month is the max to expect correct claim data?
-claims_cap = '2024-09-01'
+#claims max: what month is the max to expect correct claim data? (last claims pull: 12-03-24)
+claims_cap = '2024-11-01'
 
 # COMMAND ----------
 
@@ -52,19 +52,19 @@ claims_cap = '2024-09-01'
 # COMMAND ----------
 
 #pull in event data
-event_df = pc.query_data(spark, dbutils, 'cohort_matching_edw_events')
+event_df = dec.query_data(spark, dbutils, 'cohort_matching_edw_events')
 event_df = event_df.withColumn('utc_period', F.to_date(event_df.utc_period, 'yyyyMM'))
 
 # COMMAND ----------
 
 #pull in claims and utilization data
-claims_df = pc.query_data(spark, dbutils, 'cohort_matching_cg_claims')
+claims_df = dec.query_data(spark, dbutils, 'cohort_matching_cg_claims')
 claims_df = claims_df.withColumn('service_month', F.to_date(claims_df.service_month, 'yyyyMM'))
 
 # COMMAND ----------
 
 #pull in member demographic data
-mem_df = pc.query_data(spark, dbutils, 'cohort_matching_cg_mem')
+mem_df = dec.query_data(spark, dbutils, 'cohort_matching_cg_mem')
 mem_df = mem_df.withColumn('start_date', F.trunc(F.to_date(mem_df.start_date, 'yyyyMM'), 'month'))
 mem_df = mem_df.withColumn('end_date', F.trunc(F.to_date(mem_df.end_date, 'yyyyMM'), 'month'))
 mem_df = mem_df.withColumn('birth_year', F.trunc(F.to_date(mem_df.birth_year, 'yyyyMM'), 'month'))
@@ -73,7 +73,7 @@ mem_df = mem_df.dropDuplicates()
 # COMMAND ----------
 
 #pull in member chronic conditions data
-chron_df = pc.query_data(spark, dbutils, 'cohort_matching_cg_chron')
+chron_df = dec.query_data(spark, dbutils, 'cohort_matching_cg_chron')
 
 #de-duplicate
 exprs = {x: "max" for x in chron_df.columns if x != 'dw_member_id' and x != 'cal_year' and x != 'table_schema'}
@@ -116,8 +116,8 @@ print(pc.event_list)
 
 #select event categories to use in exposed subset
 #select categories that should disqualify members from the exposed cohort (within clean window)
-exposed_categories = ['High Cost Claimants (HCC)', 'HCC Clinical Eng', 'Case Management - Adult', 'Case Management - Oncology']
-clean_categories = ['Disease Management', 'Treatment Decision Support', 'Maternity Program', 'Case Management']
+exposed_categories = ['Carrum Health', 'Cylinder', 'Lantern', 'Virta Health','Sword', 'Equip Health','Lyra']
+clean_categories = ['Case Management', 'Transition Care - Adult', 'Rising Risk', 'Case Management - High Risk Maternity', 'Case Management - Oncology', 'Case Management - Adult', 'Maternity']
 
 # COMMAND ----------
 
@@ -144,24 +144,34 @@ exposed_subset.select('category', 'person_id').groupby('category').count().show(
 
 # MAGIC %md
 # MAGIC ###Select Control Subset - from Accolade Members
+# MAGIC Note: Current, members may be represented in the control group AND the cohort group, as long as they are represented for claims periods that do not overlap. If cohort members are excluded from the the control group completely, there will not be enough control members for meaningful matching.
 
 # COMMAND ----------
 
-#available event categories
-print(pc.event_list)
+#limit to same customers as exposed
+control_subset = mem_df.filter(F.col('edw_cust').isin(cust_list))
 
-# COMMAND ----------
-
-#select event categories that are ok to have in control, otherwise control will be composed of members without any of the events
-control_ok_categories = ['Engaged']
-
-#remove members with events
-control_subset = mem_df.join(event_df.filter(~F.col('category').isin(control_ok_categories)), on='person_id', how='left_anti')
+#if the person_id starts with DW, discard (not able to link to event data)
+control_subset = control_subset.filter(~F.col('person_id').startswith('DW'))
 
 # COMMAND ----------
 
 #add months: within claims data, within eligibility window for each member, with buffer for evaluation window
 control_subset = pc.generate_control(spark, control_subset, eval_preperiod, eval_postperiod, claims_cap)
+
+# COMMAND ----------
+
+filter_cat = exposed_categories + clean_categories
+
+#filter out member months that overlap cohort
+#for x in range(-(eval_preperiod+eval_postperiod), eval_preperiod+eval_postperiod+1):
+
+#filter out member months that overlap leading periods of cohort
+for x in range(eval_preperiod+eval_postperiod+1):
+    # print(x)
+    # print(control_subset.count())
+    control_subset = control_subset.join(event_df.filter(event_df.category.isin(filter_cat)).withColumn('utc_period', F.add_months(event_df.utc_period, x)).select('person_id', 'utc_period'), on=(['person_id', 'utc_period']), how='left_anti')
+
 
 # COMMAND ----------
 
@@ -189,13 +199,12 @@ print(pc.util_list)
 #leading_list = ['med_allowed', 'pharma_allowed', 'total_allowed', 'Emergency Room']
 leading_list = ['med_allowed', 'pharma_allowed', 'Emergency Room', 'Inpatient Medical', 'Inpatient Surgical', 'Office Procedures', 'Outpatient Services', 'Outpatient Urgent Care', 'Physician-PCP Visit', 'Physician-Preventive', 'Physician-Specialist Visit', 'Physician-Telehealth', 'total_allowed']
 
-trailing_list = ['total_allowed']
+trailing_list = ['total_allowed', 'Emergency Room', 'Inpatient Medical', 'Inpatient Surgical', 'Outpatient Services']
 
 # COMMAND ----------
 
 #add claims for matching periods to both subsets and combine subsets into one dataset
 #also removes members with negative claims or utilization (data error)
-#crashes cluster sometimes... don't know why
 
 for subset in [exposed_subset, control_subset]:
     subset_claims = pc.merge_claims(spark, subset, claims_df, match_preperiod, match_postperiod)
@@ -212,6 +221,7 @@ for subset in [exposed_subset, control_subset]:
 # COMMAND ----------
 
 print('Customers: '+ str(combined_cohorts.select('edw_cust').distinct().count()))
+# print(combined_cohorts.select(F.collect_set('edw_cust').alias('edw_cust')).first()['edw_cust'])
 print('Event sample size:')
 combined_cohorts.select('category', 'person_id').groupby('category').count().show()
 
@@ -255,6 +265,39 @@ combined_cohorts = combined_cohorts.withColumn('zip_code', F.col('zip_code').cas
 
 # COMMAND ----------
 
+#add spend pattern indicators
+#percent medical, percent increase and decrease
+# for x in range(-2, 2):
+#   #dollar value change from previous month
+#   combined_cohorts = combined_cohorts.withColumn('spend_increase'+str(x), F.round(F.when(F.col('total_allowed'+str(x))>0, F.col('total_allowed'+str(x))).otherwise(0) - 
+#                                             F.when(F.col('total_allowed'+str(x-1))>0, F.col('total_allowed'+str(x-1))).otherwise(0), 2))
+
+#   #change from previous month as a percent of total pre-intervention
+#   combined_cohorts = combined_cohorts.withColumn('spend_increase_perc'+str(x), F.round( (F.when(F.col('total_allowed'+str(x))>0, F.col('total_allowed'+str(x))).otherwise(0) - 
+#                                             F.when(F.col('total_allowed'+str(x-1))>0, F.col('total_allowed'+str(x-1))).otherwise(0)) / F.col('total_allowed_-3to0sum'), 2))
+
+# for x in range(-3, 1):
+#   #%spend
+#   combined_cohorts = combined_cohorts.withColumn('spend_perc'+str(x), F.round( (F.when(F.col('total_allowed'+str(x))>0, F.col('total_allowed'+str(x)) / F.col('total_allowed_-3to0sum')).otherwise(0) ), 2))
+
+#percent of pre-intervention spend that is medical
+combined_cohorts = combined_cohorts.withColumn('med_percent', 
+                             F.round(F.when(F.col('med_allowed_-3to0sum') > 0, F.col('med_allowed_-3to0sum') / F.col('total_allowed_-3to0sum')).otherwise(0), 2))
+#categories
+combined_cohorts = combined_cohorts.withColumn('med_percent_cat', F.when(F.col('med_percent') < 0.5, '0-50%_med')
+                                                .otherwise(F.when(F.col('med_percent') < 0.9, '50-90%_med').otherwise('mostly_med')))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ##Some Data Cleaning
+
+# COMMAND ----------
+
+combined_cohorts = combined_cohorts.distinct().fillna(0)
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ###Remove Outliers
 
@@ -274,10 +317,11 @@ continuous_variables.display()
 filtered_cohorts = combined_cohorts.filter(combined_cohorts['age']>17)
 filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['age']<71)
 
-for x in range(-3, 6):
+for x in range(-eval_preperiod, eval_postperiod+1):
     filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_allowed'+str(x)]<250000)
 
 filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_allowed_0to5sum']<250000)
+filtered_cohorts = filtered_cohorts.distinct()
 
 # COMMAND ----------
 

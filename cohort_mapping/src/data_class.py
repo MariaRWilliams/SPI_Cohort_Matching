@@ -2,12 +2,18 @@ import pyspark.sql.functions as F
 import pyspark.sql.types as T
 from functools import reduce
 
-class Data_Stats():
+class Data_Processing():
 
     def __init__(self):
         """
         no variables to initialize yet 
         """
+    
+    def query_data(self, spark, dbutils, table):
+
+        df = spark.sql(f"""SELECT * FROM dev.`clinical-analysis`.{table}""")
+
+        return df
 
     def num_col_stats(self, df, threshold_multiplier):
 
@@ -30,3 +36,35 @@ class Data_Stats():
         # print(filter_col)
 
         return df_stats.sort_values(by=['column_name'])
+    
+    def sample_matches(self, final_matched, num_sample, category=0):
+
+        if category != 0:
+            final_matched = final_matched.filter(F.col('category').contains(category))
+
+        exposed_df = final_matched.filter(~F.col('category').contains('control'))
+        control_df = final_matched.filter(F.col('category').contains('control'))
+
+        sample_exposed = exposed_df.withColumn('key',F.rand()).orderBy('key').limit(num_sample).cache()
+        sample_exposed = sample_exposed.drop('key')
+
+        sample_control = control_df.join(sample_exposed.withColumn('category',F.concat(sample_exposed.category, F.lit(' control')))
+                                                        .select('match_key', 'category'), on=['match_key', 'category'], how='inner')
+
+        return sample_exposed, sample_control
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
