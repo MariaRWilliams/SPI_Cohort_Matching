@@ -35,9 +35,10 @@ class QueryClass():
     def query_med_claims(self, schema, svc_year):
 
         q = f"""
-            select to_char(svc_service_frm_date, 'YYYYMM') as service_month
+            select to_char(svc_service_frm_date, 'YYYYMM')  as service_month
                 , dw_member_id
-                , sum(rev_allowed_amt)                     as med_allowed
+                , sum(rev_allowed_amt)                      as med_total
+                , sum(rev_paid_amt)                         as med_total_net
             from {schema}.medical
             where to_char(svc_service_frm_date, 'YYYY') = '{svc_year}'
             and rev_allowed_amt != 0
@@ -49,9 +50,10 @@ class QueryClass():
     def query_pharma_claims(self, schema, svc_year):
 
         q = f"""
-            select to_char(svc_service_frm_date, 'YYYYMM') as service_month
+            select to_char(svc_service_frm_date, 'YYYYMM')  as service_month
                 , dw_member_id
-                , sum(rev_allowed_amt)                     as pharma_allowed
+                , sum(rev_allowed_amt)                      as pharma_total
+                , sum(rev_paid_amt)                         as pharma_total_net
             from {schema}.pharmacy	
             where to_char(svc_service_frm_date, 'YYYY') = '{svc_year}'
             and rev_allowed_amt != 0
@@ -88,13 +90,11 @@ class QueryClass():
             select dw_member_id
                 , ins_emp_group_name                  as dw_customer_nm
                 , udf26_eligibility                   as person_id
-                , to_char(mbr_dob, 'YYYYMM')          as birth_year
+                , to_char(mbr_dob, 'YYYY')            as birth_year
                 , mbr_gender                          as sex
-                , mbr_msa                             as msa
-                , mbr_state                           as state
-                , mbr_region_name                     as region
+                , mbr_msa                             as msa_4
+                , mbr_state                           as state_abr
                 , mbr_zip                             as zip_code
-                , ins_plan_type_desc                  as plan_type
                 , ins_carrier_name                    as carrier
                 , min(ins_med_eff_date)               as start_date
                 , case
@@ -107,73 +107,4 @@ class QueryClass():
             group by 1,2,3,4,5,6,7,8,9,10,11
             """
               
-        return q
-    
-    def query_conditions(self, schema, svc_year):
-        
-        q = f"""
-                select to_char(svc_service_frm_date, 'YYYY') as cal_year
-                , dw_member_id
-                , max(case
-                        when svc_diag_1_code between 'F32' and 'F33' then 1
-                        when svc_diag_2_code between 'F32' and 'F33' then 1
-                        when svc_diag_3_code between 'F32' and 'F33' then 1
-                        when svc_diag_4_code between 'F32' and 'F33' then 1
-                        else 0
-                end) as depression
-                , max(case
-                        when svc_diag_1_code between 'E78' and 'E785' then 1
-                        when svc_diag_2_code between 'E78' and 'E785' then 1
-                        when svc_diag_3_code between 'E78' and 'E785' then 1
-                        when svc_diag_4_code between 'E78' and 'E785' then 1
-                        else 0
-                end) as hyperlipidemia
-                , max(case
-                        when svc_diag_1_code between 'M15' and 'M19' then 1
-                        when svc_diag_2_code between 'M15' and 'M19' then 1
-                        when svc_diag_3_code between 'M15' and 'M19' then 1
-                        when svc_diag_4_code between 'M15' and 'M19' then 1
-                        else 0
-                end) as osteoarthritis
-                , max(case
-                        when svc_diag_1_code between 'I502' and 'I5043' then 1
-                        when svc_diag_2_code between 'I502' and 'I5043' then 1
-                        when svc_diag_3_code between 'I502' and 'I5043' then 1
-                        when svc_diag_4_code between 'I502' and 'I5043' then 1
-                        else 0
-                end) as CHF
-                , max(case
-                        when svc_diag_1_code between 'C00' and 'C7A' then 1
-                        when svc_diag_2_code between 'C00' and 'C7A' then 1
-                        when svc_diag_3_code between 'C00' and 'C7A' then 1
-                        when svc_diag_4_code between 'C00' and 'C7A' then 1
-                        else 0
-                end) as cancer
-                , max(case
-                        when svc_diag_1_code between 'E08' and 'E13' then 1
-                        when svc_diag_2_code between 'E08' and 'E13' then 1
-                        when svc_diag_3_code between 'E08' and 'E13' then 1
-                        when svc_diag_4_code between 'E08' and 'E13' then 1
-                        else 0
-                end) as diabetes
-                , max(case
-                        when svc_diag_1_code between 'I25.1' and 'I25.119' then 1
-                        when svc_diag_2_code between 'I25.1' and 'I25.119' then 1
-                        when svc_diag_3_code between 'I25.1' and 'I25.119' then 1
-                        when svc_diag_4_code between 'I25.1' and 'I25.119' then 1
-                        else 0
-                end) as CAD
-                , max(case
-                        when svc_diag_1_code between 'J44' and 'J44.9' then 1
-                        when svc_diag_2_code between 'J44' and 'J44.9' then 1
-                        when svc_diag_3_code between 'J44' and 'J44.9' then 1
-                        when svc_diag_4_code between 'J44' and 'J44.9' then 1
-                        else 0
-                end) as COPD
-            from {schema}.medical
-            where to_char(svc_service_frm_date, 'YYYY') = '{svc_year}'
-            group by 1,2
-            having  depression+hyperlipidemia+osteoarthritis+cancer+CHF+diabetes+CAD+COPD >= 1
-            """
-            
         return q
