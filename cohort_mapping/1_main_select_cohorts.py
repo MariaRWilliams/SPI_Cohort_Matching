@@ -116,7 +116,7 @@ print(pc.event_list)
 
 #select event categories to use in exposed subset
 #select categories that should disqualify members from the exposed cohort (within clean window)
-exposed_categories = ['Carrum Health', 'Cylinder', 'Lantern', 'Virta Health','Sword', 'Equip Health','Lyra']
+exposed_categories = ['Care Navigation']
 clean_categories = ['Case Management', 'Transition Care - Adult', 'Rising Risk', 'Case Management - High Risk Maternity', 'Case Management - Oncology', 'Case Management - Adult', 'Maternity']
 
 # COMMAND ----------
@@ -149,7 +149,8 @@ exposed_subset.select('category', 'person_id').groupby('category').count().show(
 # COMMAND ----------
 
 #limit to same customers as exposed
-control_subset = mem_df.filter(F.col('edw_cust').isin(cust_list))
+cust_list_2 = exposed_subset.select('edw_cust').distinct().toPandas().edw_cust.tolist()
+control_subset = mem_df.filter(F.col('edw_cust').isin(cust_list_2))
 
 #if the person_id starts with DW, discard (not able to link to event data)
 control_subset = control_subset.filter(~F.col('person_id').startswith('DW'))
@@ -199,7 +200,7 @@ print(pc.util_list)
 #leading_list = ['med_allowed', 'pharma_allowed', 'total_allowed', 'Emergency Room']
 leading_list = ['med_allowed', 'pharma_allowed', 'Emergency Room', 'Inpatient Medical', 'Inpatient Surgical', 'Office Procedures', 'Outpatient Services', 'Outpatient Urgent Care', 'Physician-PCP Visit', 'Physician-Preventive', 'Physician-Specialist Visit', 'Physician-Telehealth', 'total_allowed']
 
-trailing_list = ['total_allowed', 'Emergency Room', 'Inpatient Medical', 'Inpatient Surgical', 'Outpatient Services']
+trailing_list = ['total_allowed', 'Emergency Room']
 
 # COMMAND ----------
 
@@ -251,6 +252,7 @@ combined_cohorts = pc.sum_periods(combined_cohorts, trailing_list, 0, eval_postp
 #combine utilization
 combined_cohorts = combined_cohorts.withColumn('inpatient_-3to0sum', F.col('inpatient_medical_-3to0sum') + F.col('inpatient_surgical_-3to0sum'))
 combined_cohorts = combined_cohorts.withColumn('physician_-3to0sum', F.col('physician-pcp_visit_-3to0sum') + F.col('physician-specialist_visit_-3to0sum') + F.col('physician-preventive_-3to0sum'))
+# combined_cohorts = combined_cohorts.withColumn('inpatient_0to11sum', F.col('inpatient_medical_0to11sum') + F.col('inpatient_surgical_0to11sum'))
 
 
 # COMMAND ----------
@@ -264,21 +266,6 @@ combined_cohorts = combined_cohorts.withColumn('date_int', F.round(F.unix_timest
 combined_cohorts = combined_cohorts.withColumn('zip_code', F.col('zip_code').cast(T.IntegerType())).fillna(0)
 
 # COMMAND ----------
-
-#add spend pattern indicators
-#percent medical, percent increase and decrease
-# for x in range(-2, 2):
-#   #dollar value change from previous month
-#   combined_cohorts = combined_cohorts.withColumn('spend_increase'+str(x), F.round(F.when(F.col('total_allowed'+str(x))>0, F.col('total_allowed'+str(x))).otherwise(0) - 
-#                                             F.when(F.col('total_allowed'+str(x-1))>0, F.col('total_allowed'+str(x-1))).otherwise(0), 2))
-
-#   #change from previous month as a percent of total pre-intervention
-#   combined_cohorts = combined_cohorts.withColumn('spend_increase_perc'+str(x), F.round( (F.when(F.col('total_allowed'+str(x))>0, F.col('total_allowed'+str(x))).otherwise(0) - 
-#                                             F.when(F.col('total_allowed'+str(x-1))>0, F.col('total_allowed'+str(x-1))).otherwise(0)) / F.col('total_allowed_-3to0sum'), 2))
-
-# for x in range(-3, 1):
-#   #%spend
-#   combined_cohorts = combined_cohorts.withColumn('spend_perc'+str(x), F.round( (F.when(F.col('total_allowed'+str(x))>0, F.col('total_allowed'+str(x)) / F.col('total_allowed_-3to0sum')).otherwise(0) ), 2))
 
 #percent of pre-intervention spend that is medical
 combined_cohorts = combined_cohorts.withColumn('med_percent', 
@@ -321,6 +308,7 @@ for x in range(-eval_preperiod, eval_postperiod+1):
     filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_allowed'+str(x)]<250000)
 
 filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_allowed_0to5sum']<250000)
+#filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_allowed_0to11sum']<500000)
 filtered_cohorts = filtered_cohorts.distinct()
 
 # COMMAND ----------

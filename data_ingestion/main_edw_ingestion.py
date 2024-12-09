@@ -58,17 +58,17 @@ print(str(len(cust_list))+" Customer(s) selected")
 
 # COMMAND ----------
 
-#query edw events
+#query EDW
 qc = query_class_edw.QueryClass()
 #q = qc.query_spi_events(start_year, cust_list_string)
 #q = qc.query_hcc_clinical_events(start_year, cust_list_string)
-#q = qc.query_funnel(start_year, cust_list_string)
+q = qc.query_funnel(start_year, cust_list_string)
 #q = qc.query_eng_events(start_year, cust_list_string)
 #q = qc.query_TPE_enrollment(start_year, cust_list_string)
 s_df = spark_reader.option('query', q).load()
 
 #check
-s_df.show(5)
+s_df.limit(5).display()
 
 # COMMAND ----------
 

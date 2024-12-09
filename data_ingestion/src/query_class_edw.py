@@ -76,7 +76,14 @@ class QueryClass():
         q = f""" select distinct cfd.person_id
                             , cfd.drvd_mbrshp_covrg_id
                             , cfd.utc_period
-                            , cfd.pgrm_nm                                   as category
+                            , case
+                                    when cfd.pgrm_nm like 'Conditions Care' 
+                                        or cfd.pgrm_nm like 'Symptoms Care' 
+                                        or cfd.pgrm_nm like 'Wellness Care'
+                                        or cfd.pgrm_nm like 'Preventive Care'
+                                        or cfd.pgrm_nm like 'Care Navigation' 
+                                    then 'Care Navigation' 
+                                    else cfd.pgrm_nm end                    as category
                             , case
                                     when ji.enc_idn is null then 'no_jiva'
                                     else 'jiva_close' end                   as sub_category
@@ -90,7 +97,7 @@ class QueryClass():
                 and (cfd.pgrm_nm like ('%BH%')) is false
                 and (cfd.pgrm_nm like ('%NICU%')) is false
                 and (cfd.pgrm_nm like ('%Pediatric%')) is false
-                and cfd.pgrm_nm not in ('Symptoms Care', 'Pharmacy', 'MSK', 'MHIC', 'Conditions Care')
+                and cfd.pgrm_nm not in ('Pharmacy', 'MSK', 'MHIC')
                 and left(utc_period, 4) >= '{start_year}' 
                 and cfd.org_nm in ('{customer_list}')
                 """

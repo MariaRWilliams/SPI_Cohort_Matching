@@ -49,7 +49,7 @@ full_df.columns
 
 #currently, the binary columns are used for the index and the scale columns are used for similarity matching
 #in the future, may need to separate lists of columns to scale/encode and list of columns to index/match
-mc.id_columns = ['person_id', 'category', 'utc_period']
+mc.id_columns = ['person_id', 'category', 'utc_period', 'dw_member_id']
 
 #select variables used for indexing (perfect match)
 mc.binary_columns = []
@@ -72,9 +72,9 @@ mc.scale_columns = ['total_allowed-1',
                     'diabetes',
                     'osteoarthritis',
                     'date_int',
-                    # 'med_percent',
-                    'outpatient_services_0to5sum',
-                    'inpatient_0to5sum'
+                    'med_percent',
+                    # 'outpatient_services_0to11sum',
+                    # 'inpatient_0to11sum'
                 ]
 
 #dictionary of weights (weighted after scaling)
@@ -93,6 +93,18 @@ ready_df = mc.full_transformation(full_df)
 
 # COMMAND ----------
 
+#check for duplicates: if present, either add identifier to id_columns, or aggregate
+d = ready_df.groupBy(mc.id_columns).count().filter(F.col('count')>1)
+n = d.count()
+
+print(str(n)+" records duplicated")
+
+if n>0:
+    duplicates = d.join(full_df, on=mc.id_columns, how='left').orderBy(mc.id_columns)
+    duplicates.limit(10).display()
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ###Matching Algorithm: Setup
 
@@ -100,20 +112,19 @@ ready_df = mc.full_transformation(full_df)
 
 #analysis variables
 mc.num_possible_matches = 10
-mc.num_final_matches = 1
+mc.num_final_matches = 2
 
 #model variables
 #nlist = the number of cells to cluster the control into (4 * sqrt(n) is standard?)
 #nprobe = the number of cells to check for the nearest neighbors
 #max_distance = (look into this one- what distance does FAISS return? euclidian?)
-mc.n_list = 10
-mc.n_probe = 8
+mc.n_list = 50
+mc.n_probe = 5
 mc.max_distance = 50
 
 # COMMAND ----------
 
-#possible exposed cohorts
-print(ready_df.select('category').distinct().toPandas()['category'].to_list())
+print(ready_df.filter(F.col('category')!='control').select('category').distinct().toPandas()['category'].to_list())
 
 # COMMAND ----------
 
@@ -126,7 +137,16 @@ print(ready_df.select('category').distinct().toPandas()['category'].to_list())
 
 # COMMAND ----------
 
-match_cat = ['Carrum Health', 'Lantern']
+#reload
+import importlib
+from src import matching_class
+
+importlib.reload(matching_class)
+mc = matching_class.Cohort_Matching()
+
+# COMMAND ----------
+
+match_cat = ['Care Navigation']
 for cohort in match_cat:
 
     matched, demo_combos_full = mc.main_match(spark, cohort, full_df, ready_df)
@@ -183,7 +203,7 @@ matched_df.groupby('category').agg(F.count(F.lit(1)).alias('record_count'),
 # COMMAND ----------
 
 #chart
-chart_category = 'Lantern'
+chart_category = 'Care Navigation'
 join_id_col = ['person_id', 'category', 'utc_period']
 display_id_col = ['category']
 compare_col = ['total_allowed-3', 'total_allowed-2', 'total_allowed-1', 'total_allowed0', 'total_allowed1', 'total_allowed2', 'total_allowed3', 'total_allowed4', 'total_allowed5']
@@ -232,12 +252,3 @@ sample_control_df.orderBy('match_key').display()
 #     .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts_matched")
 # )
 
-
-# COMMAND ----------
-
-#reload
-# import importlib
-# from src import matching_class
-
-# importlib.reload(matching_class)
-# mc = matching_class.Cohort_Matching()

@@ -14,6 +14,31 @@ dc = data_class.Data_Processing()
 
 # COMMAND ----------
 
+# MAGIC %sql
+# MAGIC desc extended dev.`clinical-analysis`.cohort_matching_cohorts
+
+# COMMAND ----------
+
+from delta.tables import DeltaTable
+
+table_path = "s3://nexus-ops-uc-metastore-806618191677/metastore/af4696e8-4682-4504-ba50-57cc83320343/tables/b53976ef-10bf-4df4-8cca-0d3e7258bfa9"
+deltaTable = DeltaTable.forPath(spark, table_path)
+
+history_df = deltaTable.history() \
+    .select("version") \
+    .orderBy("version", ascending=False)
+
+version = history_df.collect()[0][0]
+
+print(version)
+
+# df = spark.read \
+#     .format("delta") \
+#     .option("versionAsOf",version) \
+#     .load(delta_table_path)
+
+# COMMAND ----------
+
 #matched_df has matching variables, details_df has additional information
 matched_df = dc.query_data(spark, dbutils, 'cohort_matching_cohorts_matched')
 details_df = dc.query_data(spark, dbutils, 'cohort_matching_cohorts')
@@ -30,16 +55,11 @@ join_id_col = ['person_id', 'category', 'utc_period']
 display_id_col = ['category']
 
 #select compare columns for the final graph (selected this way so they are ordered)
-compare_col = ['total_allowed-3', 'total_allowed-2', 'total_allowed-1', 'total_allowed0', 'total_allowed1', 'total_allowed2', 'total_allowed3', 'total_allowed4', 'total_allowed5']
+compare_col = ['total_allowed-3', 'total_allowed-2', 'total_allowed-1', 'total_allowed0', 'total_allowed1', 'total_allowed2', 'total_allowed3', 'total_allowed4', 'total_allowed5', 'total_allowed6', 'total_allowed7', 'total_allowed8', 'total_allowed9', 'total_allowed10', 'total_allowed11']
 preperiod = 3
-postperiod = 5
+postperiod = 11
 
 col = display_id_col + compare_col
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ###Samples
 
 # COMMAND ----------
 
@@ -49,11 +69,16 @@ print(cats)
 
 # COMMAND ----------
 
-#check sample (can leave off sample category)
-sample_category = 'Carrum Health'
-sample_num = 5
+# MAGIC %md
+# MAGIC ###Samples
 
-sample_exposed_df, sample_control_df = dc.sample_matches(full_df, sample_num, sample_category)
+# COMMAND ----------
+
+#check sample (can leave off sample category)
+sample_category = 'Lantern'
+sample_num = 3
+
+sample_exposed_df, sample_control_df = dc.sample_matches(matched_df, sample_num, sample_category)
 #sample_exposed_df, sample_control_df = dc.sample_matches(matched_df, sample_num)
 sample_exposed_df.orderBy('match_key').display()
 sample_control_df.orderBy('match_key').display()
