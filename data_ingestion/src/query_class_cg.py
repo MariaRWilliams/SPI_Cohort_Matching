@@ -67,6 +67,26 @@ class QueryClass():
         q = f"""
                SELECT   dw_member_id,
                         to_char(servicedate, 'YYYYMM') as service_month,
+                        count(distinct case when utilizationcategory = 'ER Visit' then visitid end) as er_visits,
+                        count(distinct case when utilizationcategory = 'ER Visit' and avoidableflag = 1 then visitid end) as avoidable_er_visits,
+                        count(distinct case when utilizationcategory = 'Inpatient Admission' then visitid end) as ip_admits,
+                        count(distinct case when utilizationcategory = 'Inpatient Admission' and readmissionflag = 'Y' then visitid end) as ip_readmits,
+                        count(distinct case when utilizationcategory = 'Inpatient Admission' and eradmissionflag = 'true' then visitid end) as ip_er_admits,
+                        count(distinct case when utilizationcategory = 'Outpatient Surgery' then visitid end) as op_surgery,
+                        count(distinct case when utilizationcategory = 'Office Visit' then visitid end) as office_visits,
+                        count(distinct case when utilizationcategory = 'Urgent Care Visit' then visitid end) as uc_visits
+               FROM     {schema}.utilization
+    	       WHERE    to_char(servicedate, 'YYYY') = '{svc_year}'
+                GROUP BY 1, 2
+            """
+              
+        return q
+    
+    def query_utilization_original(self, schema, svc_year):
+
+        q = f"""
+               SELECT   dw_member_id,
+                        to_char(servicedate, 'YYYYMM') as service_month,
                         categorydescription,
                         eventtype,
     	                case when eventtype = 'Neither' then count(distinct dw_member_id || servicedate || primaryprovidernpi)
@@ -104,7 +124,7 @@ class QueryClass():
             from {schema}.eligibility
             where to_char(ins_med_term_date, 'YYYY') >= '{svc_year}'
             and to_char(ins_med_eff_date, 'YYYY') <= '{svc_year}'
-            group by 1,2,3,4,5,6,7,8,9,10,11
+            group by 1,2,3,4,5,6,7,8,9
             """
               
         return q
