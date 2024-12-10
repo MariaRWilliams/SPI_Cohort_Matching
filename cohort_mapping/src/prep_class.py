@@ -174,7 +174,9 @@ class Data_Prep():
     
     def calc_age(self, df):
 
-        df = df.withColumn('age', F.round(F.months_between(df['utc_period'], df['birth_year'])/12, 0).cast('integer'))
+        # df = df.withColumn('age', F.round(F.months_between(df['utc_period'], df['birth_year'])/12, 0).cast('integer'))
+        df = df.withColumn('age', F.round(F.year(F.col('utc_period')) - F.year(F.col('birth_year')), 0).cast('integer'))
+
         df = df.withColumn('age_band', 
                            F.when(df['age']<18, '0-17')
                            .when((df['age']>=18) & (df['age']<40), '18-39')

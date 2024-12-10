@@ -174,7 +174,7 @@ class QueryClass():
                                     on upper(dtl.drvd_mbrshp_covrg_id) = upper(pmc.drvd_mbrshp_covrg_id)
                                         and dtl.utc_period = pmc.utc_period
                 where dtl.start_dtm is not null     -- means enrolled per closed loop Qlik
-                and dtl.end_dtm is not null         -- means graduated per closed loop Qlik
+                -- and dtl.end_dtm is not null         -- means graduated per closed loop Qlik
                 and pmc.acp_mbr_flg = 1
                 and dtl.partner_org_nm in ('Carrot','Carrum Health','Cylinder','Equip Health','FOLX Health',
                                             'Headspace Care','Hinge Health','Kindbody','Lantern','Lyra',
@@ -209,3 +209,35 @@ class QueryClass():
               """
 
         return q
+    
+    def query_care(self, start_year, customer_list):
+           
+        q = f"""
+                with #first_visit as (select to_char(service_date_pacific, 'YYYY') as cal_yr
+                                        , accolade_person_id
+                                        , min(service_date_pacific)             as first_dt
+                                    from pc_edw.pc_app.bi_user_encounter pc
+                                    group by 1, 2)
+                select distinct pmc.person_id
+                            , pmc.drvd_mbrshp_covrg_id
+                            , cast(to_char(pc.service_date_pacific, 'YYYYMM') as integer)                      as utc_period
+                            , 'Care'                                                                           as category
+                            , case when fv.accolade_person_id is null then 'subsequent visits' else 'first visit' end as subcategory
+                from pc_edw.pc_app.bi_user_encounter pc
+                        inner join acp_edw.info_layer.prs_mbrshp_covrg pmc
+                                    on upper(pc.accolade_person_id) = upper(pmc.person_id)
+                                        and to_char(service_date_pacific, 'YYYYMM') = pmc.utc_period
+                        inner join acp_edw.info_layer.vw_cust_svc_yr svc
+                                    on to_char(service_date_pacific, 'YYYYMM') between svc.svc_period_start and svc.svc_period_end
+                                        and upper(pmc.org_nm) = upper(svc.org_nm)
+                        left join #first_visit fv
+                                    on pc.accolade_person_id = fv.accolade_person_id and
+                                    to_char(pc.service_date_pacific, 'YYYYMM') = to_char(fv.first_dt, 'YYYYMM')
+                where pmc.acp_mbr_flg = 1
+                and left(pmc.utc_period, 4) >= '{start_year}'
+                and pmc.org_nm in ('{customer_list}')
+                order by 1, 3
+              """
+
+        return q
+

@@ -67,7 +67,7 @@ claims_df = claims_df.withColumn('service_month', F.to_date(claims_df.service_mo
 mem_df = dec.query_data(spark, dbutils, 'cohort_matching_cg_mem')
 mem_df = mem_df.withColumn('start_date', F.trunc(F.to_date(mem_df.start_date, 'yyyyMM'), 'month'))
 mem_df = mem_df.withColumn('end_date', F.trunc(F.to_date(mem_df.end_date, 'yyyyMM'), 'month'))
-mem_df = mem_df.withColumn('birth_year', F.trunc(F.to_date(mem_df.birth_year, 'yyyyMM'), 'month'))
+mem_df = mem_df.withColumn('birth_year', F.trunc(F.to_date(mem_df.birth_year, 'yyyy'), 'year'))
 mem_df = mem_df.dropDuplicates()
 
 # COMMAND ----------
@@ -116,7 +116,7 @@ print(pc.event_list)
 
 #select event categories to use in exposed subset
 #select categories that should disqualify members from the exposed cohort (within clean window)
-exposed_categories = ['Care Navigation']
+exposed_categories = ['Carrot', 'Kindbody', 'WellRight', 'FOLX Health', 'Carrum Health', 'Rx Savings Solutions', 'Cylinder', 'Lantern', 'Headspace Care', 'Virta Health', 'Hinge Health', 'Sword', 'Equip Health', 'Lyra']
 clean_categories = ['Case Management', 'Transition Care - Adult', 'Rising Risk', 'Case Management - High Risk Maternity', 'Case Management - Oncology', 'Case Management - Adult', 'Maternity']
 
 # COMMAND ----------
@@ -198,9 +198,9 @@ print(pc.util_list)
 
 #select claims categories to add as matching/evaluation variables: these will be added for chosen leading and trialing periods
 #leading_list = ['med_allowed', 'pharma_allowed', 'total_allowed', 'Emergency Room']
-leading_list = ['med_allowed', 'pharma_allowed', 'Emergency Room', 'Inpatient Medical', 'Inpatient Surgical', 'Office Procedures', 'Outpatient Services', 'Outpatient Urgent Care', 'Physician-PCP Visit', 'Physician-Preventive', 'Physician-Specialist Visit', 'Physician-Telehealth', 'total_allowed']
+leading_list = ['med_total', 'med_total_net', 'pharma_total', 'pharma_total_net', 'er_visits', 'avoidable_er_visits', 'ip_admits', 'ip_readmits', 'ip_er_admits', 'op_surgery', 'office_visits', 'uc_visits', 'total_claims', 'total_claims_net']
 
-trailing_list = ['total_allowed', 'Emergency Room']
+trailing_list = ['total_claims', 'avoidable_er_visits', 'er_visits', 'ip_readmits', 'ip_admits', 'op_surgery']
 
 # COMMAND ----------
 
@@ -249,14 +249,6 @@ combined_cohorts = pc.sum_periods(combined_cohorts, trailing_list, 0, eval_postp
 
 # COMMAND ----------
 
-#combine utilization
-combined_cohorts = combined_cohorts.withColumn('inpatient_-3to0sum', F.col('inpatient_medical_-3to0sum') + F.col('inpatient_surgical_-3to0sum'))
-combined_cohorts = combined_cohorts.withColumn('physician_-3to0sum', F.col('physician-pcp_visit_-3to0sum') + F.col('physician-specialist_visit_-3to0sum') + F.col('physician-preventive_-3to0sum'))
-# combined_cohorts = combined_cohorts.withColumn('inpatient_0to11sum', F.col('inpatient_medical_0to11sum') + F.col('inpatient_surgical_0to11sum'))
-
-
-# COMMAND ----------
-
 #add date as a scalable integer
 combined_cohorts = combined_cohorts.withColumn('date_int', F.round(F.unix_timestamp('utc_period'), 0))
 
@@ -269,10 +261,14 @@ combined_cohorts = combined_cohorts.withColumn('zip_code', F.col('zip_code').cas
 
 #percent of pre-intervention spend that is medical
 combined_cohorts = combined_cohorts.withColumn('med_percent', 
-                             F.round(F.when(F.col('med_allowed_-3to0sum') > 0, F.col('med_allowed_-3to0sum') / F.col('total_allowed_-3to0sum')).otherwise(0), 2))
+                             F.round(F.when(F.col('med_total_-3to0sum') > 0, F.col('med_total_-3to0sum') / F.col('total_claims_-3to0sum')).otherwise(0), 2))
 #categories
 combined_cohorts = combined_cohorts.withColumn('med_percent_cat', F.when(F.col('med_percent') < 0.5, '0-50%_med')
                                                 .otherwise(F.when(F.col('med_percent') < 0.9, '50-90%_med').otherwise('mostly_med')))
+
+#percent of spend that is out of pocket
+combined_cohorts = combined_cohorts.withColumn('oop_percent', 
+                             F.round(F.when(F.col('total_claims_net_-3to0sum') > 0, F.col('total_claims_net_-3to0sum') / F.col('total_claims_-3to0sum')).otherwise(0), 2))
 
 # COMMAND ----------
 
@@ -305,10 +301,11 @@ filtered_cohorts = combined_cohorts.filter(combined_cohorts['age']>17)
 filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['age']<71)
 
 for x in range(-eval_preperiod, eval_postperiod+1):
-    filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_allowed'+str(x)]<250000)
+    filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_claims'+str(x)]<250000)
 
-filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_allowed_0to5sum']<250000)
-#filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_allowed_0to11sum']<500000)
+filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_claims_0to5sum']<250000)
+#filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_claims_0to2sum']<125000)
+#filtered_cohorts = filtered_cohorts.filter(filtered_cohorts['total_claims_0to11sum']<500000)
 filtered_cohorts = filtered_cohorts.distinct()
 
 # COMMAND ----------

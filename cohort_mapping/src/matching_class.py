@@ -89,11 +89,6 @@ class Cohort_Matching():
         ready_df = ready_df.join(full_df_scaled, [*self.id_columns], how='outer')
         ready_df = ready_df.na.fill(0)
 
-        #adjust column names
-        # ready_df = ready_df.select([F.col(x).alias(x.replace(' ', '_')) for x in ready_df.columns])
-        # ready_df = ready_df.select([F.col(x).alias(x.replace('[^a-zA-Z0-9]', '')) for x in ready_df.columns])
-        # ready_df = ready_df.select(*[x.lower() for x in ready_df.columns])
-
         #weight variables
         for col in self.weights:
             ready_df = ready_df.withColumn(col, self.weights[col] * ready_df[col])

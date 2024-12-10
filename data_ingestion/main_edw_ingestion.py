@@ -28,7 +28,7 @@ EDW_PASSWORD = dbutils.secrets.get(scope="clinical-analysis", key="edw-password"
 # COMMAND ----------
 
 spark_reader = EDWSpoke(EDW_USER, EDW_PASSWORD).connect()
-start_year = '2023'
+start_year = '2022'
 
 # COMMAND ----------
 
@@ -62,9 +62,10 @@ print(str(len(cust_list))+" Customer(s) selected")
 qc = query_class_edw.QueryClass()
 #q = qc.query_spi_events(start_year, cust_list_string)
 #q = qc.query_hcc_clinical_events(start_year, cust_list_string)
-q = qc.query_funnel(start_year, cust_list_string)
+#q = qc.query_funnel(start_year, cust_list_string)
 #q = qc.query_eng_events(start_year, cust_list_string)
 #q = qc.query_TPE_enrollment(start_year, cust_list_string)
+# q = qc.query_care(start_year, cust_list_string)
 s_df = spark_reader.option('query', q).load()
 
 #check

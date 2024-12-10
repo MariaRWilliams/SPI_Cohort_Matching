@@ -29,7 +29,7 @@ full_df = dc.query_data(spark, dbutils, 'cohort_matching_cohorts')
 
 #stats: what else would be useful? do both before and after
 full_df.groupby('category').agg(F.count(F.lit(1)).alias('record_count'), 
-                                F.round(F.mean('total_allowed0'), 2).alias('avg spend at mo0'), 
+                                F.round(F.mean('total_claims0'), 2).alias('avg spend at mo0'), 
                                 F.round(F.mean('age'), 2).alias('avg age'),
                                 F.min('utc_period').alias('min_period'),
                                 F.max('utc_period').alias('max_period'),
@@ -47,6 +47,11 @@ full_df.columns
 
 # COMMAND ----------
 
+# ad hoc: restrict further
+# full_df = full_df.filter(F.col('op_surgery1')>0)
+
+# COMMAND ----------
+
 #currently, the binary columns are used for the index and the scale columns are used for similarity matching
 #in the future, may need to separate lists of columns to scale/encode and list of columns to index/match
 mc.id_columns = ['person_id', 'category', 'utc_period', 'dw_member_id']
@@ -56,33 +61,38 @@ mc.binary_columns = []
 mc.to_binary_columns = ['age_band', 'sex']
 
 #select variables used for closest match
-mc.scale_columns = ['total_allowed-1',
-                    'total_allowed-2',
-                    'total_allowed-3',
-                    'total_allowed0',
-                    'inpatient_-3to0sum',
-                    'emergency_room_-3to0sum',
-                    'physician_-3to0sum',
+mc.scale_columns = ['total_claims-1',
+                    'total_claims-2',
+                    'total_claims-3',
+                    'total_claims0',
                     'age',
-                    'cancer',
-                    'chf',
-                    'cad',
+                    'malignant_neoplasm',
+                    'heart_failure',
+                    'coronary_artery_disease',
                     'hyperlipidemia',
                     'copd',
-                    'diabetes',
+                    'diabetes_mellitus',
                     'osteoarthritis',
                     'date_int',
                     'med_percent',
+                    'oop_percent',
+                    'er_visits_-3to0sum', 
+                    'ip_admits_-3to0sum', 
+                    'op_surgery_-3to0sum',
+                    'uc_visits_-3to0sum', 
+                    'office_visits_-3to0sum', 
+                    'avoidable_er_visits_-3to0sum', 
+                    'ip_readmits_-3to0sum'
                     # 'outpatient_services_0to11sum',
                     # 'inpatient_0to11sum'
                 ]
 
 #dictionary of weights (weighted after scaling)
 mc.weights = {
-            'total_allowed-1':3,
-            'total_allowed-2':3,
-            'total_allowed-3':3,
-            'total_allowed0':3,
+            'total_claims-1':3,
+            'total_claims-2':3,
+            'total_claims-3':3,
+            'total_claims0':3,
               }
 
 mc.final_columns = mc.id_columns + mc.binary_columns + mc.scale_columns + mc.to_binary_columns
@@ -112,14 +122,14 @@ if n>0:
 
 #analysis variables
 mc.num_possible_matches = 10
-mc.num_final_matches = 2
+mc.num_final_matches = 1
 
 #model variables
 #nlist = the number of cells to cluster the control into (4 * sqrt(n) is standard?)
 #nprobe = the number of cells to check for the nearest neighbors
 #max_distance = (look into this one- what distance does FAISS return? euclidian?)
-mc.n_list = 50
-mc.n_probe = 5
+mc.n_list = 40
+mc.n_probe = 10
 mc.max_distance = 50
 
 # COMMAND ----------
@@ -137,16 +147,7 @@ print(ready_df.filter(F.col('category')!='control').select('category').distinct(
 
 # COMMAND ----------
 
-#reload
-import importlib
-from src import matching_class
-
-importlib.reload(matching_class)
-mc = matching_class.Cohort_Matching()
-
-# COMMAND ----------
-
-match_cat = ['Care Navigation']
+match_cat = ['Carrum Health','Lantern']
 for cohort in match_cat:
 
     matched, demo_combos_full = mc.main_match(spark, cohort, full_df, ready_df)
@@ -165,7 +166,7 @@ for cohort in match_cat:
 
 #statistics of original cohort
 full_df.groupby('category').agg(F.count(F.lit(1)).alias('record_count'), 
-                                F.round(F.mean('total_allowed0'), 2).alias('avg spend at mo0'), 
+                                F.round(F.mean('total_claims0'), 2).alias('avg spend at mo0'), 
                                 F.round(F.mean('age'), 2).alias('avg age'),
                                 F.min('utc_period').alias('min_period'),
                                 F.max('utc_period').alias('max_period'),
@@ -175,7 +176,7 @@ full_df.groupby('category').agg(F.count(F.lit(1)).alias('record_count'),
 
 #statistics for matched cohort
 final_matched.groupby('category').agg(F.count(F.lit(1)).alias('record_count'), 
-                                F.round(F.mean('total_allowed0'), 2).alias('avg spend at mo0'), 
+                                F.round(F.mean('total_claims0'), 2).alias('avg spend at mo0'), 
                                 F.round(F.mean('age'), 2).alias('avg age'),
                                 F.min('utc_period').alias('min_period'),
                                 F.max('utc_period').alias('max_period'),
@@ -194,7 +195,7 @@ matched_df = matched_df.withColumn('category', matched_df['category_long']).dist
 
 #statistics for matched cohort with details (created duplicates?)
 matched_df.groupby('category').agg(F.count(F.lit(1)).alias('record_count'), 
-                                F.round(F.mean('total_allowed0'), 2).alias('avg spend at mo0'), 
+                                F.round(F.mean('total_claims0'), 2).alias('avg spend at mo0'), 
                                 F.round(F.mean('age'), 2).alias('avg age'),
                                 F.min('utc_period').alias('min_period'),
                                 F.max('utc_period').alias('max_period'),
@@ -202,11 +203,11 @@ matched_df.groupby('category').agg(F.count(F.lit(1)).alias('record_count'),
 
 # COMMAND ----------
 
-#chart
-chart_category = 'Care Navigation'
+#sample chart
+chart_category = 'Sword'
 join_id_col = ['person_id', 'category', 'utc_period']
 display_id_col = ['category']
-compare_col = ['total_allowed-3', 'total_allowed-2', 'total_allowed-1', 'total_allowed0', 'total_allowed1', 'total_allowed2', 'total_allowed3', 'total_allowed4', 'total_allowed5']
+compare_col = ['total_claims-3', 'total_claims-2', 'total_claims-1', 'total_claims0', 'total_claims1', 'total_claims2']
 
 col = display_id_col + compare_col
 chart_df = matched_df.filter(F.col('category').startswith(chart_category)).groupby(*display_id_col).agg(*[F.round(F.avg(F.col(x)),2).alias(x) for x in col if x not in join_id_col])
@@ -252,3 +253,12 @@ sample_control_df.orderBy('match_key').display()
 #     .saveAsTable("dev.`clinical-analysis`.cohort_matching_cohorts_matched")
 # )
 
+
+# COMMAND ----------
+
+#reload
+# import importlib
+# from src import matching_class
+
+# importlib.reload(matching_class)
+# mc = matching_class.Cohort_Matching()

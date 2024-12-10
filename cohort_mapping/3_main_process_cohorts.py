@@ -14,34 +14,13 @@ dc = data_class.Data_Processing()
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC desc extended dev.`clinical-analysis`.cohort_matching_cohorts
-
-# COMMAND ----------
-
-from delta.tables import DeltaTable
-
-table_path = "s3://nexus-ops-uc-metastore-806618191677/metastore/af4696e8-4682-4504-ba50-57cc83320343/tables/b53976ef-10bf-4df4-8cca-0d3e7258bfa9"
-deltaTable = DeltaTable.forPath(spark, table_path)
-
-history_df = deltaTable.history() \
-    .select("version") \
-    .orderBy("version", ascending=False)
-
-version = history_df.collect()[0][0]
-
-print(version)
-
-# df = spark.read \
-#     .format("delta") \
-#     .option("versionAsOf",version) \
-#     .load(delta_table_path)
-
-# COMMAND ----------
-
 #matched_df has matching variables, details_df has additional information
 matched_df = dc.query_data(spark, dbutils, 'cohort_matching_cohorts_matched')
 details_df = dc.query_data(spark, dbutils, 'cohort_matching_cohorts')
+
+# COMMAND ----------
+
+#matched_df = spark.sql(f"""SELECT * FROM dev.`clinical-analysis`.cohort_matching_cohorts_matched Version as of 31""")
 
 # COMMAND ----------
 
@@ -55,9 +34,9 @@ join_id_col = ['person_id', 'category', 'utc_period']
 display_id_col = ['category']
 
 #select compare columns for the final graph (selected this way so they are ordered)
-compare_col = ['total_allowed-3', 'total_allowed-2', 'total_allowed-1', 'total_allowed0', 'total_allowed1', 'total_allowed2', 'total_allowed3', 'total_allowed4', 'total_allowed5', 'total_allowed6', 'total_allowed7', 'total_allowed8', 'total_allowed9', 'total_allowed10', 'total_allowed11']
+compare_col = ['total_claims-3', 'total_claims-2', 'total_claims-1', 'total_claims0', 'total_claims1', 'total_claims2', 'total_claims3','total_claims4','total_claims5']
 preperiod = 3
-postperiod = 11
+postperiod = 5
 
 col = display_id_col + compare_col
 
@@ -94,7 +73,7 @@ sample_control_df.orderBy('match_key').display()
 #dev note: will need to solve for duplicates made when details are joined, add more details such as matching criteria/closeness
 
 matched_agg_df = matched_df.groupby('category').agg(F.count(F.lit(1)).alias('record_count'), 
-                                F.round(F.mean('total_allowed0'), 2).alias('avg spend at time of int'), 
+                                F.round(F.mean('total_claims0'), 2).alias('avg spend at time of int'), 
                                 F.round(F.mean('age'), 2).alias('avg age'),
                                 F.min('utc_period').alias('min interaction period'),
                                 F.max('utc_period').alias('max interaction period')
@@ -106,7 +85,7 @@ matched_agg_df = matched_df.groupby('category').agg(F.count(F.lit(1)).alias('rec
 
 #add difference from original cohort
 orginal_agg_df = details_df.groupby('category').agg(F.count(F.lit(1)).alias('record_count'), 
-                                F.round(F.mean('total_allowed0'), 2).alias('avg spend at time of int'), 
+                                F.round(F.mean('total_claims0'), 2).alias('avg spend at time of int'), 
                                 F.round(F.mean('age'), 2).alias('avg age'),
                                 F.min('utc_period').alias('min interaction period'),
                                 F.max('utc_period').alias('max interaction period')
@@ -132,13 +111,13 @@ full_df = full_df.withColumn('category', full_df['category_long']).distinct()
 
 #details statistics
 full_agg_df = full_df.groupby('category').agg(F.count(F.lit(1)).alias('record_count'), 
-                                F.round(F.mean('total_allowed0'), 2).alias('avg spend at time of int'), 
+                                F.round(F.mean('total_claims0'), 2).alias('avg spend at time of int'), 
                                 F.round(F.mean('age'), 2).alias('avg age'),
                                 F.min('utc_period').alias('min interaction period'),
                                 F.max('utc_period').alias('max interaction period')
-                                )
+                                ).orderBy('category')
 
-#full_agg_df.display()
+full_agg_df.display()
 
 # COMMAND ----------
 
@@ -205,8 +184,8 @@ for this in cats:
 
 # COMMAND ----------
 
-final_table = full_chart.withColumn('PMPM_preperiod', F.round((F.col('total_allowed-3')+F.col('total_allowed-2')+F.col('total_allowed-1'))/3, 2))
-final_table = final_table.withColumn('PMPM_postperiod',  F.round((F.col('total_allowed0')+F.col('total_allowed1')+F.col('total_allowed2')+F.col('total_allowed3')+F.col('total_allowed4')+F.col('total_allowed5'))/6, 2))
+final_table = full_chart.withColumn('PMPM_preperiod', F.round((F.col('total_claims-3')+F.col('total_claims-2')+F.col('total_claims-1'))/3, 2))
+final_table = final_table.withColumn('PMPM_postperiod',  F.round((F.col('total_claims0')+F.col('total_claims1')+F.col('total_claims2')+F.col('total_claims3')+F.col('total_claims4')+F.col('total_claims5'))/6, 2))
 
 final_table.display()
 
