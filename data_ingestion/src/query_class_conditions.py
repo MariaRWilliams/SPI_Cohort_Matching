@@ -4,62 +4,8 @@ class ConditionsClass():
         """
         no variables to initialize yet 
         """
-        
-    #query edw for values used in temp_conditions #disease_joiner_tmp
-    def query_conditions(self):
-
-        q = f"""
-            SELECT DISTINCT value_set_nm as condition,
-                            cd_sys_concept_cd,
-                            replace(cd_sys_concept_display, CHR(39), '')  as description,
-                            '%' || replace(cd_sys_concept_cd, '.', '%') || '%' as ilike_joiner
-            FROM info_layer.terminology_value_set_compose_dtl
-            WHERE value_set_nm IN ('MALIGNANT_NEOPLASM', 'BLOOD_DYSCRASIAS', 'DIABETES_MELLITUS', 'SUBSTANCE_DEPENDENCE', 
-                                    'RHEUMATOID_ARTHRITIS', 'PERIPHERAL_VASCULAR_DISEASE', 'CARDIOVASCULAR_DISEASE', 'CORONARY_ARTERY_DISEASE', 
-                                    'OSTEOARTHRITIS', 'INFLAMMATORY_BOWEL_DISEASE', 'HYPERTENSION', 'LIVER_DISEASE_ALL', 
-                                    'IMMUNODEFICIENCY_DISORDERS', 'HEART_FAILURE', 'ASTHMA', 'DEPRESSION', 'PSYCHOSIS_AFFECTIVE', 
-                                    'CKD3TO5_ESRD_DIALYSIS', 'COPD', 'EATING_DISORDERS', 'HYPERLIPIDEMIA', 'ATRIAL_FIBRILLATION', 
-                                    'OBESITY_MORBID', 'CHRONIC_PAIN')
-            AND cd_sys_sts != 'retired'
-            AND cd_sys_concept_sts != 'retired'
-            AND value_set_sts != 'retired'
-            AND value_Set_compose_sts != 'retired'
-            ORDER BY value_set_nm, ilike_joiner;
-            """
-              
-        return q
-    
-    #query edw for values used in temp_conditions #drug_table_tmp
-    def query_conditions(self):
-
-        q = f"""
-            SELECT cd_sys_concept_cd
-            FROM info_layer.terminology_value_set_compose_dtl 
-            WHERE value_set_nm IN ('INSULIN', 'DIABETES_MEDS_NOT_INSULIN')
-            AND cd_sys_sts != 'retired'
-            AND cd_sys_concept_sts != 'retired'
-            AND value_set_sts != 'retired'
-            AND value_Set_compose_sts != 'retired'
-            """
-              
-        return q
-    
-    #query edw for values to exclude from temp_conditions #drug_table_tmp
-    def query_conditions(self):
-
-        q = f"""
-            SELECT DISTINCT cd_sys_concept_cd 
-            FROM info_layer.terminology_value_set_compose_dtl 
-            WHERE value_set_nm IN ('GLP1_RA')
-            AND cd_sys_sts != 'retired'
-            AND cd_sys_concept_sts != 'retired'
-            AND value_set_sts != 'retired'
-            AND value_Set_compose_sts != 'retired';
-            """
-              
-        return q
-        
-    #first temp tables for conditions / diabetes meds
+               
+    # query cg: temp tables for conditions / diabetes meds
     def temp_conditions(self):
 
         q = f"""
@@ -5651,7 +5597,7 @@ class ConditionsClass():
 
         return q
     
-    #temp table of members and conditions: cedargate version
+    # query cg: temp table of members and conditions
     def temp_conditions_cg(self, schema, svc_year='2024'):
         
         q = f"""
@@ -5815,171 +5761,7 @@ class ConditionsClass():
         """
         return q
     
-    #temp table of members and conditions: marketscan version
-    def temp_conditions_ms(self, svc_year='2024'):
-        
-        q = f"""
-            -- Finding members by the 'two days of service' rule
-            DROP TABLE IF EXISTS #TWO_DAY_RULE;
-            WITH
-                dx1 AS (
-                    SELECT enrolid, svcdate, dx1 as dx, DJ.*
-                    FROM eoc_workarea.all_claims AC
-                    INNER JOIN #disease_joiner DJ ON dx1 = replace(cd_sys_concept_cd, '.', '')
-                ),
-
-                dx2 AS (
-                    SELECT enrolid, svcdate, dx2 as dx, DJ.*
-                    FROM eoc_workarea.all_claims AC
-                    INNER JOIN #disease_joiner DJ ON dx2 = replace(cd_sys_concept_cd, '.', '')
-                ),
-
-                dx3 AS (
-                    SELECT enrolid, svcdate, dx3 as dx, DJ.*
-                    FROM eoc_workarea.all_claims AC
-                    INNER JOIN #disease_joiner DJ ON dx3 = replace(cd_sys_concept_cd, '.', '')
-                ),
-
-                dx4 AS (
-                    SELECT enrolid, svcdate, dx4 as dx, DJ.*
-                    FROM eoc_workarea.all_claims AC
-                    INNER JOIN #disease_joiner DJ ON dx4 = replace(cd_sys_concept_cd, '.', '')
-                ),
-
-                all_dxs AS (
-                    SELECT DISTINCT enrolid, svcdate, dx, condition FROM dx1 UNION DISTINCT
-                    SELECT DISTINCT enrolid, svcdate, dx, condition FROM dx2 UNION DISTINCT
-                    SELECT DISTINCT enrolid, svcdate, dx, condition FROM dx3 UNION DISTINCT
-                    SELECT DISTINCT enrolid, svcdate, dx, condition FROM dx4
-                ),
-
-                checked AS (
-                    SELECT enrolid, condition as condition, CASE WHEN COUNT(DISTINCT svcdate) > 1 THEN 1 ELSE 0 END as flag
-                    FROM All_dxs AD
-                    GROUP BY enrolid, condition
-                )
-            SELECT *
-            INTO #TWO_DAY_RULE
-            FROM checked;
-
-            -- ER Rule
-            DROP TABLE IF EXISTS #ER_RULE;
-            WITH
-                dx1 AS (
-                    SELECT enrolid, svcdate, dx1 as dx, DJ.*
-                    FROM eoc_workarea.all_claims AC
-                    INNER JOIN #disease_joiner DJ ON dx1 = replace(cd_sys_concept_cd, '.', '')
-                    WHERE svcscat IN ('svcscat', '10120', '10220', '10320', '10420', '10520', '12220', '20120', '20220', '21120', 
-                                        '21220', '22120', '22320', '30120', '30220', '30320', '30420', '30520', '30620', '31120', 
-                                        '31220', '31320', '31420', '31520', '31620')
-                ),
-                checked AS (
-                    SELECT enrolid, condition as condition, CASE WHEN COUNT(DISTINCT svcdate) > 0 THEN 1 ELSE 0 END as flag
-                    FROM dx1 AD
-                    GROUP BY enrolid, condition
-                )
-            SELECT *
-            INTO #ER_RULE
-            FROM checked;
-
-            -- Admit Rule
-            DROP TABLE IF EXISTS #IP_RULE;
-            WITH
-                ay21 AS (
-                    SELECT enrolid, admdate, pdx as dx, DJ.*
-                    FROM public.ccaei211 AC
-                    INNER JOIN #disease_joiner DJ ON pdx = replace(cd_sys_concept_cd, '.', '')
-                ),
-
-                ay22 AS (
-                    SELECT enrolid, admdate, pdx as dx, DJ.*
-                    FROM public.ccaei221 AC
-                    INNER JOIN #disease_joiner DJ ON pdx = replace(cd_sys_concept_cd, '.', '')
-                ),
-
-                merged AS (
-                    SELECT * FROM ay21 UNION ALL SELECT * FROM ay22
-                ),
-
-                checked AS (
-                    SELECT enrolid, condition as condition, CASE WHEN COUNT(DISTINCT admdate) > 0 THEN 1 ELSE 0 END as flag
-                    FROM merged AD
-                    GROUP BY enrolid, condition
-                )
-            SELECT *
-            INTO #IP_RULE
-            FROM checked;
-
-            -- DIAB MED RULE
-            DROP TABLE IF EXISTS #DRUG_RULE;
-            WITH
-                FILTER AS (
-                    SELECT * FROM eoc_workarea.all_drug_claims P
-                            INNER JOIN #DRUG_TABLE DJ ON P.ndcnum = DJ.ndc AND
-                                date_part('year', svcdate) IN (P.year, P.year - 1)
-                            )
-                            
-                    SELECT enrolid, 'DIABETES_MELLITUS' as condition, CASE WHEN COUNT(DISTINCT svcdate) > 0 THEN 3 ELSE 0 END as flag
-                    INTO #DRUG_RULE
-                    FROM FILTER
-                    GROUP BY enrolid
-            ;      
-            
-            DROP TABLE IF EXISTS #FINAL_tmp;  
-            WITH
-                RULE_MERGE AS (
-                    SELECT enrolid::varchar, condition, flag FROM #TWO_DAY_RULE UNION ALL
-                    SELECT enrolid::varchar, condition, flag FROM #ER_RULE UNION ALL
-                    SELECT enrolid::varchar, condition, flag FROM #IP_RULE UNION ALL
-                    SELECT enrolid::varchar, condition, flag FROM #DRUG_RULE
-                ),
-
-                ANY_RULE AS (
-                    SELECT enrolid, condition, CASE WHEN SUM(flag) > 0 THEN 1 ELSE 0 END as flag
-                    FROM RULE_MERGE
-                    GROUP BY enrolid, condition
-                )
-
-            SELECT
-                enrolid as member_id,
-                NVL(MALIGNANT_NEOPLASM, 0) AS MALIGNANT_NEOPLASM,
-                NVL(BLOOD_DYSCRASIAS, 0) AS BLOOD_DYSCRASIAS,
-                NVL(DIABETES_MELLITUS, 0) AS DIABETES_MELLITUS,
-                NVL(SUBSTANCE_DEPENDENCE, 0) AS SUBSTANCE_DEPENDENCE,
-                NVL(RHEUMATOID_ARTHRITIS, 0) AS RHEUMATOID_ARTHRITIS,
-                NVL(PERIPHERAL_VASCULAR_DISEASE, 0) AS PERIPHERAL_VASCULAR_DISEASE,
-                NVL(CARDIOVASCULAR_DISEASE, 0) AS CARDIOVASCULAR_DISEASE,
-                NVL(CORONARY_ARTERY_DISEASE, 0) AS CORONARY_ARTERY_DISEASE,
-                NVL(OSTEOARTHRITIS, 0) AS OSTEOARTHRITIS,
-                NVL(INFLAMMATORY_BOWEL_DISEASE, 0) AS INFLAMMATORY_BOWEL_DISEASE,
-                NVL(HYPERTENSION, 0) AS HYPERTENSION,
-                NVL(LIVER_DISEASE_ALL, 0) AS LIVER_DISEASE_ALL,
-                NVL(IMMUNODEFICIENCY_DISORDERS, 0) AS IMMUNODEFICIENCY_DISORDERS,
-                NVL(HEART_FAILURE, 0) AS HEART_FAILURE,
-                NVL(ASTHMA, 0) AS ASTHMA,
-                NVL(DEPRESSION, 0) AS DEPRESSION,
-                NVL(PSYCHOSIS_AFFECTIVE, 0) AS PSYCHOSIS_AFFECTIVE,
-                NVL(CKD3TO5_ESRD_DIALYSIS, 0) AS CKD3TO5_ESRD_DIALYSIS,
-                NVL(COPD, 0) AS COPD,
-                NVL(EATING_DISORDERS, 0) AS EATING_DISORDERS,
-                NVL(HYPERLIPIDEMIA, 0) AS HYPERLIPIDEMIA,
-                NVL(ATRIAL_FIBRILLATION, 0) AS ATRIAL_FIBRILLATION,
-                NVL(OBESITY_MORBID, 0) AS OBESITY_MORBID,
-                NVL(CHRONIC_PAIN, 0) AS CHRONIC_PAIN
-            INTO #FINAL_tmp
-            FROM
-                (SELECT enrolid, condition, flag FROM ANY_RULE)
-                    PIVOT (SUM(flag) FOR
-                        condition IN ('MALIGNANT_NEOPLASM', 'BLOOD_DYSCRASIAS', 'DIABETES_MELLITUS', 'SUBSTANCE_DEPENDENCE', 
-                                        'RHEUMATOID_ARTHRITIS', 'PERIPHERAL_VASCULAR_DISEASE', 'CARDIOVASCULAR_DISEASE', 'CORONARY_ARTERY_DISEASE', 
-                                        'OSTEOARTHRITIS', 'INFLAMMATORY_BOWEL_DISEASE', 'HYPERTENSION', 'LIVER_DISEASE_ALL', 'IMMUNODEFICIENCY_DISORDERS', 
-                                        'HEART_FAILURE', 'ASTHMA', 'DEPRESSION', 'PSYCHOSIS_AFFECTIVE', 'CKD3TO5_ESRD_DIALYSIS', 'COPD', 
-                                        'EATING_DISORDERS', 'HYPERLIPIDEMIA', 'ATRIAL_FIBRILLATION', 'OBESITY_MORBID', 'CHRONIC_PAIN')
-                    );
-        """
-        return q
-    
-    #final conditions query 
+    # query cg: final conditions query 
     def query_conditions(self, svc_year='2024'):
         
         q = f"""
@@ -6019,6 +5801,16 @@ class ConditionsClass():
                 HEART_FAILURE + ASTHMA + DEPRESSION + PSYCHOSIS_AFFECTIVE + CKD3TO5_ESRD_DIALYSIS + COPD + EATING_DISORDERS + HYPERLIPIDEMIA + ATRIAL_FIBRILLATION + 
                 OBESITY_MORBID + CHRONIC_PAIN > 0
             ORDER BY member_id
-            ;
         """
+        return q
+        
+    # query emo marketscan: pharmacy utilization
+    # limited to relevant diabetes medications in notebook
+    def ms_query_all_meds(self):
+
+        q = f"""
+            SELECT distinct P.enrolid  as member_id
+            , P.ndcnum
+            FROM emo_edw.ibm_marketscan.all_drug_claims P
+            """
         return q

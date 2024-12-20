@@ -1,4 +1,5 @@
 import pandas as pd
+import pyspark.sql.functions as F
 
 class CG_Helper():
 
@@ -82,71 +83,4 @@ class CG_Helper():
         member_df['industry'] = member_df['industry'].fillna('unknown')
         
         return member_df
-    
-    def map_state(self, member_df):
-
-        mapping = {"Alabama": "AL",
-                    "Alaska": "AK",
-                    "Arizona": "AZ",
-                    "Arkansas": "AR",
-                    "American Samoa": "AS",
-                    "California": "CA",
-                    "Colorado": "CO",
-                    "Connecticut": "CT",
-                    "Delaware": "DE",
-                    "District of Columbia": "DC",
-                    "Florida": "FL",
-                    "Georgia": "GA",
-                    "Guam": "GU",
-                    "Hawaii": "HI",
-                    "Idaho": "ID",
-                    "Illinois": "IL",
-                    "Indiana": "IN",
-                    "Iowa": "IA",
-                    "Kansas": "KS",
-                    "Kentucky": "KY",
-                    "Louisiana": "LA",
-                    "Maine": "ME",
-                    "Maryland": "MD",
-                    "Massachusetts": "MA",
-                    "Michigan": "MI",
-                    "Minnesota": "MN",
-                    "Mississippi": "MS",
-                    "Missouri": "MO",
-                    "Montana": "MT",
-                    "Nebraska": "NE",
-                    "Nevada": "NV",
-                    "New Hampshire": "NH",
-                    "New Jersey": "NJ",
-                    "New Mexico": "NM",
-                    "New York": "NY",
-                    "North Carolina": "NC",
-                    "North Dakota": "ND",
-                    "Northern Mariana Islands": "MP",
-                    "Ohio": "OH",
-                    "Oklahoma": "OK",
-                    "Oregon": "OR",
-                    "Pennsylvania": "PA",
-                    "Puerto Rico": "PR",
-                    "Rhode Island": "RI",
-                    "South Carolina": "SC",
-                    "South Dakota": "SD",
-                    "Tennessee": "TN",
-                    "Texas": "TX",
-                    "Trust Territories": "TT",
-                    "Utah": "UT",
-                    "Vermont": "VT",
-                    "Virginia": "VA",
-                    "Virgin Islands": "VI",
-                    "Washington": "WA",
-                    "West Virginia": "WV",
-                    "Wisconsin": "WI",
-                    "Wyoming": "WY"
-                }
-        
-        map_col = F.create_map([F.lit(x) for i in mapping.items() for x in i])
-        customer_df.withColumn('state_abv', map_col[F.col('state')])
-
-        return customer_df
-
         
