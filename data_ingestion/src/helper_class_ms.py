@@ -26,7 +26,7 @@ class MS_Helper():
                     .cache()                       
                     )
         
-        return claims_df
+        return med_codes_df
     
     def get_visit_util(self, med_codes_df):
 

@@ -18,7 +18,8 @@ class QueryClass():
               join information_schema.tables u on t.table_schema = u.table_schema and u.table_name='utilization'
               join information_schema.tables q on t.table_schema = q.table_schema and q.table_name='accoladequalitymetrics'
               join information_schema.tables g on t.table_schema = g.table_schema and g.table_name='genericqualitymetrics'
-              WHERE t.table_schema like 'stage1_%_%_extract'
+              WHERE t.table_schema like 'stage1_acl_%_extract'
+              and t.table_schema != 'stage1_acl_acl_extract'
               """
 
         return q
@@ -43,8 +44,10 @@ class QueryClass():
                 , mbr_state                           as state_abr
                 , mbr_zip                             as zip_code
                 , ins_carrier_name                    as carrier
-                , case when mbr_msa != 'Blank'
-                    then mbr_msa end                  as msa_4
+                --, case when mbr_msa != 'Blank'
+                --    then mbr_msa
+                --    else None end                     as msa_4
+                , mbr_msa                               as msa_4
                 , max(case when mbr_msa = '0000' then 1
                     else 0 end)                       as rural
                 , max(case when mbr_msa is null 
@@ -78,7 +81,7 @@ class QueryClass():
               
         return q
 
-    def query_pharma_claims(self, schema, svc_year):
+    def query_rx_claims(self, schema, svc_year):
 
         q = f"""
             select to_char(svc_service_frm_date, 'YYYYMM')  as service_month
@@ -92,9 +95,9 @@ class QueryClass():
             """
               
         return q
-    
+
     #query all codes and limit with tables pulled elsewhere
-    def query_utilization(self, schema, svc_year):
+    def query_med_codes(self, schema, svc_year):
 
         q = f""" select med.dw_member_id                                                        as member_id
                         , med.svc_service_frm_date                                              as svc_start
@@ -113,6 +116,16 @@ class QueryClass():
 
         return q
     
+    def query_rx_codes(self, schema, svc_year):
+
+        q = f"""
+            select distinct dw_member_id as member_id
+                        , svc_ndc_code
+            from {schema}.pharmacy
+            where to_char(svc_service_frm_date, 'YYYY') = '{svc_year}'
+            """
+        return q
+        
     # #old
     # def query_utilization_3(self, schema, svc_year):
 
