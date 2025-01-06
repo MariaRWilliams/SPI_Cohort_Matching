@@ -12,8 +12,10 @@ class Data_Prep():
     def __init__(self):
         self.event_list = []
         self.util_list = []
-        self.min_claim = 0
-        self.max_claim = 0
+        self.min_cg_claim = 0
+        self.max_cg_claim = 0
+        self.min_ms_claim = 0
+        self.max_ms_claim = 0
 
     def set_event_categories(self, event_df):
 
@@ -24,17 +26,21 @@ class Data_Prep():
     def set_util_categories(self, claims_df):
 
         col = claims_df.columns
-        col.remove('table_schema')
-        col.remove('dw_member_id')
+        col.remove('member_id')
         col.remove('service_month')
         self.util_list = col
 
         return 0
     
-    def set_claims_window(self, claims_df, claims_cap):
+    def set_cg_claims_window(self, claims_df, claims_cap):
 
-        self.min_claim = claims_df.agg(F.min('service_month')).collect()[0][0]
-        self.max_claim = datetime.datetime.strptime(claims_cap, '%Y-%m-%d')
+        self.min_cg_claim = claims_df.agg(F.min('service_month')).collect()[0][0]
+        self.max_cg_claim = datetime.datetime.strptime(claims_cap, '%Y-%m-%d')
+
+    def set_ms_claims_window(self, claims_df):
+
+        self.min_ms_claim = claims_df.agg(F.min('service_month')).collect()[0][0]
+        self.max_ms_claim = claims_df.agg(F.max('service_month')).collect()[0][0]
        
     def clean_exposed(self, spark_c, event_df, exposed_categories, exclude_categories, preperiod, postperiod):
 
@@ -69,8 +75,8 @@ class Data_Prep():
         df = df.withColumn('preperiod', F.add_months(df.utc_period, -preperiod))
         df = df.withColumn('postperiod', F.add_months(df.utc_period, postperiod))
 
-        df = df.withColumn('first_claim', F.lit(self.min_claim))
-        df = df.withColumn('last_claim', F.lit(self.max_claim))
+        df = df.withColumn('first_claim', F.lit(self.min_cg_claim))
+        df = df.withColumn('last_claim', F.lit(self.max_cg_claim))
         df = df.filter((df.preperiod >= df.first_claim) & (df.postperiod <= df.last_claim))
 
         condition_list = [df.person_id == demo_df.person_id,
@@ -85,10 +91,15 @@ class Data_Prep():
 
         return df
     
-    def generate_control(self, spark_session, df, preperiod, postperiod, claims_cap):
+    def generate_control(self, spark_session, df, preperiod, postperiod, src='CG'):
 
-        min_claim_range = self.min_claim + pd.DateOffset(months=preperiod)
-        max_claim_range = self.max_claim - pd.DateOffset(months=postperiod)
+        if src == 'CG':
+            min_claim_range = self.min_cg_claim + pd.DateOffset(months=preperiod)
+            max_claim_range = self.max_cg_claim - pd.DateOffset(months=postperiod)
+        if src == 'MS':
+            min_claim_range = self.min_ms_claim + pd.DateOffset(months=preperiod)
+            max_claim_range = self.max_ms_claim - pd.DateOffset(months=postperiod)
+
         df_wd = df.withColumn('pre_claim', F.lit(min_claim_range))
         df_wd = df_wd.withColumn('post_claim', F.lit(max_claim_range))
         df_wd = df_wd.withColumn('pre_elig', F.add_months(df.start_date, preperiod))
@@ -116,11 +127,11 @@ class Data_Prep():
         df = df.withColumn('preperiod', F.add_months(df.utc_period, -preperiod))
         df = df.withColumn('postperiod', F.add_months(df.utc_period, postperiod))
 
-        condition_list = [df.dw_member_id == claims_df.dw_member_id,
+        condition_list = [df.member_id == claims_df.member_id,
                     claims_df.service_month.between(df.preperiod, df.postperiod) 
                 ]
         
-        df = df.join(claims_df, condition_list, how='inner').drop(claims_df.dw_member_id)
+        df = df.join(claims_df, condition_list, how='inner').drop(claims_df.member_id)
        
         return df
     
@@ -129,7 +140,7 @@ class Data_Prep():
         col_list = list(set(leading_list+trailing_list))
         df = df.withColumn('mo_seq', F.round(F.months_between(df['service_month'], df['utc_period']), 0).cast('integer'))
         
-        df_pivot = df.select('dw_member_id', 'utc_period').dropDuplicates()
+        df_pivot = df.select('member_id', 'utc_period').dropDuplicates()
         for c in col_list:
             seq_start = 0
             seq_end = 0
@@ -141,15 +152,15 @@ class Data_Prep():
 
             time_set = (df.withColumn('mo_pivot',  F.concat(F.lit(c), F.col('mo_seq')))
                         .filter((F.col('mo_seq')>=seq_start) & (F.col('mo_seq')<=seq_end))
-                        .groupBy(['dw_member_id', 'utc_period'])
+                        .groupBy(['member_id', 'utc_period'])
                         .pivot('mo_pivot')
                         .agg(F.round(F.first(c), 2))
             )
 
-            condition_list = [df_pivot.dw_member_id == time_set.dw_member_id, 
+            condition_list = [df_pivot.member_id == time_set.member_id, 
                               df_pivot.utc_period == time_set.utc_period]
             
-            df_pivot = df_pivot.join(time_set, condition_list, how='left').select(df_pivot["*"], *[time_set[c] for c in time_set.columns if c not in ["dw_member_id", "utc_period"]])
+            df_pivot = df_pivot.join(time_set, condition_list, how='left').select(df_pivot["*"], *[time_set[c] for c in time_set.columns if c not in ["member_id", "utc_period"]])
 
         df_pivot = df_pivot.na.fill(0)
         df_pivot = df_pivot.select([F.col(x).alias(x.replace(' ', '_')) for x in df_pivot.columns])
@@ -174,7 +185,6 @@ class Data_Prep():
     
     def calc_age(self, df):
 
-        # df = df.withColumn('age', F.round(F.months_between(df['utc_period'], df['birth_year'])/12, 0).cast('integer'))
         df = df.withColumn('age', F.round(F.year(F.col('utc_period')) - F.year(F.col('birth_year')), 0).cast('integer'))
 
         df = df.withColumn('age_band', 
@@ -198,7 +208,6 @@ class Data_Prep():
                 df = df.withColumn(col_nm, F.round(df[col_nm]+ df[c+str(n)], 2))
 
         return df
-
     
 
 

@@ -11,7 +11,7 @@ class MS_Helper():
     
     def join_claims_spend(self, med_df, pharma_df):
 
-        claims_df = med_df.join(pharma_df, on=['member_id', 'service_month'], how = 'outer')
+        claims_df = med_df.join(pharma_df, on=['member_id', 'service_month'], how = 'outer').fillna(0)
         claims_df = claims_df.withColumn('total_claims', F.col('med_total') + F.col('pharma_total'))
         claims_df = claims_df.withColumn('total_claims_net', F.col('med_total_net') + F.col('pharma_total_net'))
         
@@ -193,6 +193,7 @@ class MS_Helper():
                 }
         
         map_col = F.create_map([F.lit(x) for i in mapping.items() for x in i])
-        member_df = member_df.withColumn('state_abv', map_col[F.col('state')])
+        member_df = member_df.withColumn('state_abr', map_col[F.col('state')])
+        member_df = member_df.drop('state')
 
         return member_df

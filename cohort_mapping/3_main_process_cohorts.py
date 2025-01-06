@@ -30,7 +30,7 @@ details_df.columns
 # COMMAND ----------
 
 #choose id columns, and variables for analysis
-join_id_col = ['person_id', 'category', 'utc_period']
+join_id_col = ['member_id', 'category', 'utc_period']
 display_id_col = ['category']
 
 #select compare columns for the final graph (selected this way so they are ordered)
@@ -54,7 +54,7 @@ print(cats)
 # COMMAND ----------
 
 #check sample (can leave off sample category)
-sample_category = 'Lantern'
+sample_category = 'Case Management'
 sample_num = 3
 
 sample_exposed_df, sample_control_df = dc.sample_matches(matched_df, sample_num, sample_category)

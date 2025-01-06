@@ -232,8 +232,8 @@ class Cohort_Matching():
         exposed = ready_df.filter(ready_df['category']==cohort)
         control = ready_df.filter(ready_df['category']=='control')
 
-        ex_agg = exposed.groupby(*fixed_cols).agg(F.count('person_id').alias('exposed_count'))
-        c_agg = control.groupby(*fixed_cols).agg(F.count('person_id').alias('control_count'))
+        ex_agg = exposed.groupby(*fixed_cols).agg(F.count('member_id').alias('exposed_count'))
+        c_agg = control.groupby(*fixed_cols).agg(F.count('member_id').alias('control_count'))
         
         demo_combos_full = ex_agg.join(c_agg, on=fixed_cols, how='left')
         # disc_demos = demo_combos_full.filter(F.col('control_count') <= self.n_list*40)

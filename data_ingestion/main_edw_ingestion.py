@@ -2,16 +2,15 @@
 # MAGIC %md
 # MAGIC ##Data Ingestion for EDW Data
 # MAGIC Steps Contained in this Notebook:
-# MAGIC - import libraries and establish connections
-# MAGIC - get customer list from CG table 
+# MAGIC - Import libraries and establish connections
+# MAGIC - Retrieve customer list from CG table 
 # MAGIC   - this is to limit the query to members for whom we have claims data
-# MAGIC - query edw cluster
-# MAGIC - write results to data catalog
+# MAGIC - Query edw for event data
+# MAGIC - Write results to data catalog
 
 # COMMAND ----------
 
 from src import query_class_edw
-from src import helper_class
 import pandas as pd
 import re
 
@@ -45,9 +44,7 @@ cust = (
 )
 
 #convert to edw customers
-hc = helper_class.CG_Helper()
 cust = cust.toPandas()
-#cust = hc.map_customers(cust, 'customer_nm')
 cust_list = cust[~cust['edw_cust'].isin(['BK', 'NON-ACCOLADE', 'ACCOLADE', 'BLANK'])]['edw_cust'].unique()
 cust_list = [re.sub("\'", "\'\'", s) for s in cust_list]
 cust_list_string = "','".join(cust_list)

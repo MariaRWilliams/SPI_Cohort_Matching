@@ -30,7 +30,7 @@ hc = helper_class_ms.MS_Helper()
 # COMMAND ----------
 
 #queries one year at a time for memory reasons
-svc_year = '2022'
+svc_year = '2023'
 
 # COMMAND ----------
 
@@ -119,6 +119,18 @@ mem_df = hc.map_state(mem_df)
 
 # COMMAND ----------
 
+#append data to table
+# (
+#     mem_df
+#     .write
+#     .format("delta")
+#     .option("mergeSchema", "true")
+#     .mode("append")
+#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_ms_mem")
+# )
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ###Particpant Spend and Utilization Data
 
@@ -135,12 +147,12 @@ claims_df = hc.join_claims_spend(med_df, pharma_df)
 
 # COMMAND ----------
 
-#claims: codes
-q = qc_ms.query_med_codes(svc_year)
-med_codes_df = emo_spoke.option('query', q).load()
-
+#claims: codes (~20 minutes)
 q = qc_ms.query_rx_codes(svc_year)
 pharma_codes_df = emo_spoke.option('query', q).load()
+
+q = qc_ms.query_med_codes(svc_year)
+med_codes_df = emo_spoke.option('query', q).load()
 
 med_codes_df = hc.join_med_codes(med_codes_df, util_tmp, avoidable_er_tmp)
 med_codes_df = med_codes_df.cache()
@@ -161,15 +173,27 @@ claims_df = claims_df.join(util_df, on=['member_id', 'service_month'], how='left
 
 # COMMAND ----------
 
-#overwrite table with data
-(
-    claims_df
-    .write
-    .format("delta")
-    .option("overwriteSchema", "true")
-    .mode("overwrite")
-    .saveAsTable("dev.`clinical-analysis`.cohort_matching_ms_claims")
-)
+#overwrite table with data (~20 minutes including code above)
+# (
+#     claims_df
+#     .write
+#     .format("delta")
+#     .option("overwriteSchema", "true")
+#     .mode("overwrite")
+#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_ms_claims")
+# )
+
+# COMMAND ----------
+
+#append data to table
+# (
+#     claims_df
+#     .write
+#     .format("delta")
+#     .option("mergeSchema", "true")
+#     .mode("append")
+#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_ms_claims")
+# )
 
 # COMMAND ----------
 
@@ -195,21 +219,36 @@ cond_rx = hc.rx_conditions(pharma_codes_df, drug_table_tmp)
 
 # COMMAND ----------
 
-#union conditions tables and pivot to flag columns
+#union conditions tables and pivot to flag columns (~15 minutes)
 cond_full = cond_util.union(cond_dx).union(cond_rx).dropDuplicates()
 cond_full = cond_full.withColumn('condition', F.lower(F.col('condition'))).groupBy('member_id').pivot('condition').agg(F.when(F.first('condition').isNotNull(), 1).otherwise(0)).fillna(0)
+
+#add year since we are doing one year at a time
+cond_full = cond_full.withColumn('cal_yr', F.lit(svc_year))
 
 # COMMAND ----------
 
 #overwrite table with data
-(
-    cond_full
-    .write
-    .format("delta")
-    .option("overwriteSchema", "true")
-    .mode("overwrite")
-    .saveAsTable("dev.`clinical-analysis`.cohort_matching_ms_chron")
-)
+# (
+#     cond_full
+#     .write
+#     .format("delta")
+#     .option("overwriteSchema", "true")
+#     .mode("overwrite")
+#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_ms_chron")
+# )
+
+# COMMAND ----------
+
+#append data to table
+# (
+#     cond_full
+#     .write
+#     .format("delta")
+#     .option("mergeSchema", "true")
+#     .mode("append")
+#     .saveAsTable("dev.`clinical-analysis`.cohort_matching_ms_chron")
+# )
 
 # COMMAND ----------
 

@@ -54,7 +54,7 @@ full_df.columns
 
 #currently, the binary columns are used for the index and the scale columns are used for similarity matching
 #in the future, may need to separate lists of columns to scale/encode and list of columns to index/match
-mc.id_columns = ['person_id', 'category', 'utc_period', 'dw_member_id']
+mc.id_columns = ['member_id', 'category', 'utc_period']
 
 #select variables used for indexing (perfect match)
 mc.binary_columns = []
@@ -76,15 +76,8 @@ mc.scale_columns = ['total_claims-1',
                     'date_int',
                     'med_percent',
                     'oop_percent',
-                    'er_visits_-3to0sum', 
-                    'ip_admits_-3to0sum', 
-                    'op_surgery_-3to0sum',
-                    'uc_visits_-3to0sum', 
-                    'office_visits_-3to0sum', 
-                    'avoidable_er_visits_-3to0sum', 
-                    'ip_readmits_-3to0sum'
-                    # 'outpatient_services_0to11sum',
-                    # 'inpatient_0to11sum'
+                    'er_-3to0sum', 
+                    'inpatient_-3to0sum'
                 ]
 
 #dictionary of weights (weighted after scaling)
@@ -147,7 +140,7 @@ print(ready_df.filter(F.col('category')!='control').select('category').distinct(
 
 # COMMAND ----------
 
-match_cat = ['Carrum Health','Lantern']
+match_cat = ['Case Management']
 for cohort in match_cat:
 
     matched, demo_combos_full = mc.main_match(spark, cohort, full_df, ready_df)
@@ -204,8 +197,8 @@ matched_df.groupby('category').agg(F.count(F.lit(1)).alias('record_count'),
 # COMMAND ----------
 
 #sample chart
-chart_category = 'Sword'
-join_id_col = ['person_id', 'category', 'utc_period']
+chart_category = 'Case Management'
+join_id_col = ['member_id', 'category', 'utc_period']
 display_id_col = ['category']
 compare_col = ['total_claims-3', 'total_claims-2', 'total_claims-1', 'total_claims0', 'total_claims1', 'total_claims2']
 
