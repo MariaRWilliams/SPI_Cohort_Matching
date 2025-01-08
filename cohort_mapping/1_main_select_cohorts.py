@@ -41,8 +41,8 @@ eval_postperiod = 5
 match_preperiod = 3
 match_postperiod = 5
 
-#claims max: what month is the max to expect correct claim data? (last claims pull: 12-03-24)
-claims_cap = '2024-11-01'
+#claims max: what month is the max to expect correct claim data? (last claims pull: 01-07-25)
+claims_cap = '2024-12-01'
 
 # COMMAND ----------
 
@@ -99,13 +99,13 @@ chron_df = chron_df.select(*[F.col(c).alias(c.replace(')','')) for c in chron_df
 # COMMAND ----------
 
 #pull in Marketscan member chronic conditions data
-ms_chron_df = dec.query_data(spark, dbutils, 'cohort_matching_cg_chron')
+ms_chron_df = dec.query_data(spark, dbutils, 'cohort_matching_ms_chron')
 
 #de-duplicate
-exprs = {x: "max" for x in chron_df.columns if x != 'member_id' and x != 'cal_year' }
-chron_df = chron_df.groupBy('member_id').agg(exprs)
-chron_df = chron_df.select(*[F.col(c).alias(c.replace('max(','')) for c in chron_df.columns])
-chron_df = chron_df.select(*[F.col(c).alias(c.replace(')','')) for c in chron_df.columns])
+exprs = {x: "max" for x in ms_chron_df.columns if x != 'member_id' and x != 'cal_year' }
+ms_chron_df = ms_chron_df.groupBy('member_id').agg(exprs)
+ms_chron_df = ms_chron_df.select(*[F.col(c).alias(c.replace('max(','')) for c in ms_chron_df.columns])
+ms_chron_df = ms_chron_df.select(*[F.col(c).alias(c.replace(')','')) for c in ms_chron_df.columns])
 
 
 # COMMAND ----------
@@ -144,8 +144,8 @@ print(pc.event_list)
 
 #select event categories to use in exposed subset
 #select categories that should disqualify members from the exposed cohort (within clean window)
-exposed_categories = ['Care Navigation']
-clean_categories = ['Case Management', 'Maternity']
+exposed_categories = ['Carrot', 'Kindbody', 'WellRight', 'FOLX Health', 'Carrum Health', 'Rx Savings Solutions', 'Cylinder', 'Lantern', 'Headspace Care', 'Virta Health', 'Sword', 'Hinge Health', 'Equip Health', 'Lyra']
+clean_categories = ['Case Management', 'Transition Care - Adult', 'Maternity', 'Maternity Program']
 
 # COMMAND ----------
 
@@ -221,7 +221,7 @@ print(pc.util_list)
 #select claims categories to add as matching/evaluation variables: these will be added for chosen leading and trialing periods
 leading_list = ['med_total', 'med_total_net', 'pharma_total', 'pharma_total_net', 'total_claims', 'total_claims_net', 'avoidable_er', 'readmission', 'office_visits', 'er', 'inpatient']
 
-trailing_list = ['total_claims']
+trailing_list = ['total_claims', 'avoidable_er', 'readmission']
 
 # COMMAND ----------
 
@@ -255,10 +255,10 @@ combined_cohorts = exp_joined.unionByName(ctr_joined).cache()
 
 # COMMAND ----------
 
-#print('Customers: '+ str(combined_cohorts.select('edw_cust').distinct().count()))
+# print('Customers: '+ str(combined_cohorts.select('edw_cust').distinct().count()))
 # print(combined_cohorts.select(F.collect_set('edw_cust').alias('edw_cust')).first()['edw_cust'])
-# print('Event sample size:')
-# combined_cohorts.select('category', 'member_id').groupby('category').count().show()
+print('Event sample size:')
+combined_cohorts.select('category', 'member_id').groupby('category').count().show()
 
 # COMMAND ----------
 
